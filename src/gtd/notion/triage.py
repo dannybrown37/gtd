@@ -106,13 +106,15 @@ def _process_single_entry(entry: ProjectEntry) -> bool:  # noqa: C901, PLR0911, 
     # List Category (for List status)
     list_category = None
     if status == 'List':
-        categories = get_list_categories()
-        list_category = fzf_on_a_list(
-            categories,
-            prompt=f'"{entry.header}" → List Category',
-        )
+        list_category = entry.list_category or None
         if not list_category:
-            return False
+            categories = get_list_categories()
+            list_category = fzf_on_a_list(
+                categories,
+                prompt=f'"{entry.header}" → List Category',
+            )
+            if not list_category:
+                return False
 
     # Next Actionable Step
     next_step = None
