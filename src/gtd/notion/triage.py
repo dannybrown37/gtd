@@ -43,7 +43,8 @@ def _get_triage_entries() -> list[ProjectEntry]:
             ],
         },
     )
-    return [ProjectEntry.from_page(p) for p in pages]
+    entries = [ProjectEntry.from_page(p) for p in pages]
+    return [e for e in entries if not (e.status == 'List' and e.list_category)]
 
 
 def _process_single_entry(entry: ProjectEntry) -> bool:  # noqa: C901, PLR0911, PLR0912, PLR0915
