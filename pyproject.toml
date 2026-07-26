@@ -1,0 +1,47 @@
+[project]
+name = "gtd"
+version = "0.2.0"
+description = "GTD + 12-Week Year CLI powered by Notion"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = ["click>=8.1.0", "httpx>=0.28.0", "pydantic>=2.13.4", "python-dateutil>=2.9.0.post0", "textual>=0.71.0"]
+
+[project.optional-dependencies]
+api = ["flask>=3.1.0"]
+
+
+[project.scripts]
+gtd = "gtd.cli:main"
+
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+
+[build-system]
+requires = ["setuptools>=75.0"]
+build-backend = "setuptools.build_meta"
+
+
+[tool.ruff]
+extend = "../config/.ruff.toml"
+target-version = "py312"
+
+[tool.ruff.lint]
+ignore = [
+    "S311",
+    "S101",
+    "I001",
+    "S113",
+    "PLR0913",
+    "COM812",  # conflicts with formatter
+    "FBT001",  # click uses bool positional args by design
+]
+
+[tool.ruff.lint.per-file-ignores]
+"test_*.py" = ["ANN201", "PLR2004", "ANN001", "ANN003", "ARG002", "PT019"]
+"tests/**" = ["ANN201", "PLR2004", "ANN001", "ANN003", "ARG002", "PT019"]
+"api.py" = ["ANN401"]
+
+[dependency-groups]
+dev = ["pytest>=9.1.1"]
