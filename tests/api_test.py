@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
 
-@pytest.fixture()
+@pytest.fixture
 def client(monkeypatch: pytest.MonkeyPatch) -> Iterator[FlaskClient]:
     monkeypatch.setenv('GTD_API_KEY', 'test-key')
     api.app.config['TESTING'] = True
@@ -21,7 +21,7 @@ def client(monkeypatch: pytest.MonkeyPatch) -> Iterator[FlaskClient]:
         yield c
 
 
-@pytest.fixture()
+@pytest.fixture
 def auth_header() -> dict[str, str]:
     return {'Authorization': 'Bearer test-key'}
 

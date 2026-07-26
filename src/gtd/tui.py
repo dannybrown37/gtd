@@ -123,6 +123,7 @@ class TwoFieldModal(ModalScreen[tuple[str, str] | None]):
         self,
         title: str,
         label1: str,
+        *,
         placeholder1: str = '',
         label2: str = '',
         placeholder2: str = '',

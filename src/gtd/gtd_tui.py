@@ -2130,9 +2130,9 @@ class TodayContent(BaseEntryContent):
             TwoFieldModal(
                 'Waiting For',
                 'Who/what are you waiting on?',
-                entry.next_step or '',
-                'Follow-up date (optional)',
-                'e.g. Friday, in 3 days',
+                initial1=entry.next_step or '',
+                label2='Follow-up date (optional)',
+                placeholder2='e.g. Friday, in 3 days',
             )
         )
         if not result:
