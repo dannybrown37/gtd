@@ -1,7 +1,11 @@
+import asyncio
+from unittest.mock import MagicMock, patch
+
 import httpx
 
 from gtd.gtd_tui import (
     _classify_network_error,
+    _open_steps_editor,
     _render_entry_detail,
     _render_entry_summary,
 )
@@ -146,3 +150,26 @@ class TestClassifyNetworkError:
     def test_non_network_does_not_swallow(self):
         msg, _ = _classify_network_error(RuntimeError('boom'))
         assert msg == ''
+
+
+class TestOpenStepsEditor:
+    def _run(self, monkeypatch, editor='vim') -> list[str]:
+        monkeypatch.setenv('EDITOR', editor)
+        fake_app = MagicMock()
+        fake_app.suspend.return_value.__enter__ = MagicMock(return_value=None)
+        fake_app.suspend.return_value.__exit__ = MagicMock(return_value=False)
+
+        captured = {}
+
+        def fake_run(args, check=False) -> None:  # noqa: ARG001, FBT002
+            captured['args'] = args
+
+        with patch('gtd.gtd_tui.subprocess.run', side_effect=fake_run):
+            asyncio.run(_open_steps_editor(fake_app))
+        return captured['args']
+
+    def test_opens_editor_at_last_line(self, monkeypatch):
+        args = self._run(monkeypatch)
+        assert args[0] == 'vim'
+        assert args[1] == '+'
+        assert args[2].endswith('.md')

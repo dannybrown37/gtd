@@ -562,7 +562,7 @@ async def _open_steps_editor(app: App, initial_text: str = '') -> str:
         f.write(instructions + initial_text)
     editor = os.environ.get('EDITOR', 'nvim')
     with app.suspend():
-        subprocess.run([editor, tmp_path], check=False)  # noqa: S603
+        subprocess.run([editor, '+', tmp_path], check=False)  # noqa: S603
     content = Path(tmp_path).read_text()
     Path(tmp_path).unlink(missing_ok=True)
     lines = [ln for ln in content.split('\n') if not ln.startswith('#')]
