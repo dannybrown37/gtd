@@ -17,7 +17,7 @@ from gtd.storage import (
 
 
 @pytest.fixture(autouse=True)
-def isolated_storage(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def _isolated_storage(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Redirect all storage paths to a temp directory."""
     monkeypatch.setattr(storage, 'OUTPUT_PATH', tmp_path)
     monkeypatch.setattr(storage, 'CONFIG_PATH', tmp_path / 'config.json')

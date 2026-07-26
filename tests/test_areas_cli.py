@@ -8,7 +8,7 @@ from gtd.cli import cli
 
 
 @pytest.fixture(autouse=True)
-def isolated_areas(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def _isolated_areas(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(storage, 'AREAS_PATH', tmp_path / 'areas.json')
 
 

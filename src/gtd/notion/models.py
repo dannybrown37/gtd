@@ -53,7 +53,7 @@ class ProjectEntry:
     updated_date: str = ''
 
     @classmethod
-    def from_page(cls, page: dict) -> ProjectEntry:
+    def from_page(cls: type[ProjectEntry], page: dict) -> ProjectEntry:
         props = page['properties']
         return cls(
             page_id=page['id'],

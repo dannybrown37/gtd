@@ -72,7 +72,7 @@ def _process_single_entry(entry: ProjectEntry) -> bool:  # noqa: C901, PLR0911, 
     # Context (skip for List items)
     context = None
     if status != 'List':
-        from gtd.notion.client import (  # noqa: PLC0415
+        from gtd.notion.client import (
             add_context,
             remove_context,
         )

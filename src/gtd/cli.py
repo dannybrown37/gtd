@@ -17,7 +17,7 @@ def cli(ctx: click.Context, verbose: bool) -> None:
     ctx.obj['verbose'] = verbose
 
     if ctx.invoked_subcommand is None:
-        from gtd.gtd_tui import run_gtd_tui  # noqa: PLC0415
+        from gtd.gtd_tui import run_gtd_tui
 
         run_gtd_tui()
 
@@ -30,7 +30,7 @@ def cli(ctx: click.Context, verbose: bool) -> None:
 )
 def init(upgrade: bool) -> None:
     """Set up or upgrade the GTD Notion database."""
-    from gtd.notion.init import init_database  # noqa: PLC0415
+    from gtd.notion.init import init_database
 
     try:
         init_database(upgrade=upgrade)
@@ -41,7 +41,7 @@ def init(upgrade: bool) -> None:
 @cli.command()
 def triage() -> None:
     """Interactively process items needing triage."""
-    from gtd.notion.triage import (  # noqa: PLC0415
+    from gtd.notion.triage import (
         process_triage,
     )
 
@@ -56,7 +56,7 @@ def triage() -> None:
 @click.pass_context
 def filter_context(ctx: click.Context, context: tuple[str, ...]) -> None:
     """Filter by context name (e.g. gtd filter Phone)."""
-    from gtd.notion.entries import (  # noqa: PLC0415
+    from gtd.notion.entries import (
         list_entries,
     )
 
@@ -70,7 +70,7 @@ def filter_context(ctx: click.Context, context: tuple[str, ...]) -> None:
 @cli.command()
 def today() -> None:
     """Show actionable items for today."""
-    from gtd.notion.today import (  # noqa: PLC0415
+    from gtd.notion.today import (
         list_today,
     )
 
@@ -80,7 +80,7 @@ def today() -> None:
 @cli.command()
 def snooze() -> None:
     """Snooze today's items until tomorrow."""
-    from gtd.notion.today import (  # noqa: PLC0415
+    from gtd.notion.today import (
         snooze_today,
     )
 
@@ -93,7 +93,7 @@ def snooze() -> None:
 @cli.command(name='log')
 def log_cmd() -> None:
     """Log a note and reschedule a recurring item."""
-    from gtd.notion.log import (  # noqa: PLC0415
+    from gtd.notion.log import (
         log_and_reschedule,
     )
 
@@ -106,7 +106,7 @@ def log_cmd() -> None:
 @cli.command()
 def done() -> None:
     """Mark a current project as done (archives it)."""
-    from gtd.notion.commands import (  # noqa: PLC0415
+    from gtd.notion.commands import (
         mark_done,
     )
 
@@ -119,7 +119,7 @@ def done() -> None:
 @cli.command()
 def review() -> None:
     """Run the GTD weekly review ritual."""
-    from gtd.notion.review import (  # noqa: PLC0415
+    from gtd.notion.review import (
         weekly_review,
     )
 
@@ -132,7 +132,7 @@ def review() -> None:
 @cli.command()
 def update() -> None:
     """Update fields on an existing project."""
-    from gtd.notion.entries import (  # noqa: PLC0415
+    from gtd.notion.entries import (
         update_entry,
     )
 
@@ -145,7 +145,7 @@ def update() -> None:
 @cli.command()
 def defer() -> None:
     """Defer a project by setting a follow-up date."""
-    from gtd.notion.commands import (  # noqa: PLC0415
+    from gtd.notion.commands import (
         defer_entry,
     )
 
@@ -158,7 +158,7 @@ def defer() -> None:
 @cli.command()
 def someday() -> None:
     """Review Someday/Maybe items — keep, activate, or drop."""
-    from gtd.notion.review import (  # noqa: PLC0415
+    from gtd.notion.review import (
         review_someday,
     )
 
@@ -177,7 +177,7 @@ def capture(header: tuple[str, ...]) -> None:
         gtd capture Buy groceries
         gtd capture               (interactive prompt)
     """
-    from gtd.notion.capture import capture_item  # noqa: PLC0415
+    from gtd.notion.capture import capture_item
 
     try:
         capture_item(header=' '.join(header) if header else None)
@@ -190,7 +190,7 @@ def capture(header: tuple[str, ...]) -> None:
 def areas(ctx: click.Context) -> None:
     """Manage Horizons of Focus (Areas of Responsibility)."""
     if ctx.invoked_subcommand is None:
-        from gtd.storage import load_areas  # noqa: PLC0415
+        from gtd.storage import load_areas
 
         area_list = load_areas()
         if not area_list:
@@ -206,7 +206,7 @@ def areas(ctx: click.Context) -> None:
 @click.option('--notes', default='', help='Optional description or reminder')
 def areas_add(name: str, notes: str) -> None:
     """Add a new Horizon of Focus."""
-    from gtd.storage import load_areas, save_areas  # noqa: PLC0415
+    from gtd.storage import load_areas, save_areas
 
     area_list = load_areas()
     if any(a['name'].lower() == name.lower() for a in area_list):
@@ -221,7 +221,7 @@ def areas_add(name: str, notes: str) -> None:
 @click.argument('name')
 def areas_remove(name: str) -> None:
     """Remove a Horizon of Focus."""
-    from gtd.storage import load_areas, save_areas  # noqa: PLC0415
+    from gtd.storage import load_areas, save_areas
 
     area_list = load_areas()
     updated = [a for a in area_list if a['name'].lower() != name.lower()]
@@ -237,7 +237,7 @@ def areas_remove(name: str) -> None:
 @click.argument('notes')
 def areas_notes(name: str, notes: str) -> None:
     """Update the notes/description for an area."""
-    from gtd.storage import load_areas, save_areas  # noqa: PLC0415
+    from gtd.storage import load_areas, save_areas
 
     area_list = load_areas()
     for a in area_list:
@@ -254,7 +254,7 @@ def areas_notes(name: str, notes: str) -> None:
 def contexts(ctx: click.Context) -> None:
     """Manage GTD contexts (Computer, Home, Phone, etc.)."""
     if ctx.invoked_subcommand is None:
-        from gtd.notion.client import get_contexts  # noqa: PLC0415
+        from gtd.notion.client import get_contexts
 
         context_list = sorted(get_contexts())
         if not context_list:
@@ -268,7 +268,7 @@ def contexts(ctx: click.Context) -> None:
 @click.argument('name')
 def contexts_add(name: str) -> None:
     """Add a new context."""
-    from gtd.notion.client import add_context, get_contexts  # noqa: PLC0415
+    from gtd.notion.client import add_context, get_contexts
 
     if name in get_contexts():
         click.echo(f'Context "{name}" already exists.')
@@ -281,7 +281,7 @@ def contexts_add(name: str) -> None:
 @click.argument('name')
 def contexts_remove(name: str) -> None:
     """Remove a context."""
-    from gtd.notion.client import (  # noqa: PLC0415
+    from gtd.notion.client import (
         get_contexts,
         remove_context,
     )
@@ -298,7 +298,7 @@ def contexts_remove(name: str) -> None:
 @click.argument('new_name')
 def contexts_rename(old_name: str, new_name: str) -> None:
     """Rename a context and update all items with that context."""
-    from gtd.notion.client import (  # noqa: PLC0415
+    from gtd.notion.client import (
         get_contexts,
         query_database,
         rename_context,
@@ -330,7 +330,7 @@ def contexts_rename(old_name: str, new_name: str) -> None:
 @cli.command()
 def dump() -> None:
     """Rapid-fire brain dump — capture everything, triage later."""
-    from gtd.notion.review import brain_dump  # noqa: PLC0415
+    from gtd.notion.review import brain_dump
 
     try:
         brain_dump()
@@ -340,32 +340,32 @@ def dump() -> None:
 
 def _interactive_menu(verbose: bool) -> None:  # noqa: C901, PLR0912, PLR0915
     """Launch interactive fzf menu for GTD actions."""
-    from gtd.notion.commands import (  # noqa: PLC0415
+    from gtd.notion.commands import (
         defer_entry,
         mark_done,
         set_waiting_for,
     )
-    from gtd.notion.entries import (  # noqa: PLC0415
+    from gtd.notion.entries import (
         list_entries,
         update_entry,
     )
-    from gtd.notion.log import log_and_reschedule  # noqa: PLC0415
-    from gtd.notion.review import (  # noqa: PLC0415
+    from gtd.notion.log import log_and_reschedule
+    from gtd.notion.review import (
         brain_dump,
         review_someday,
         weekly_review,
     )
-    from gtd.notion.today import (  # noqa: PLC0415
+    from gtd.notion.today import (
         list_today,
         snooze_today,
     )
-    from gtd.notion.capture import (  # noqa: PLC0415
+    from gtd.notion.capture import (
         capture_item,
     )
-    from gtd.notion.triage import (  # noqa: PLC0415
+    from gtd.notion.triage import (
         process_triage,
     )
-    from gtd.ui import (  # noqa: PLC0415
+    from gtd.ui import (
         fzf_on_a_list,
         pause,
     )
@@ -449,7 +449,7 @@ def _interactive_menu(verbose: bool) -> None:  # noqa: C901, PLR0912, PLR0915
                 case 'Review Someday/Maybe':
                     review_someday()
                 case 'Filter by context':
-                    from gtd.notion.client import (  # noqa: PLC0415
+                    from gtd.notion.client import (
                         get_select_options,
                     )
 
@@ -467,7 +467,7 @@ def _interactive_menu(verbose: bool) -> None:  # noqa: C901, PLR0912, PLR0915
 def config(ctx: click.Context) -> None:
     """View or set GTD configuration."""
     if ctx.invoked_subcommand is None:
-        from gtd.notion.config import load_config  # noqa: PLC0415
+        from gtd.notion.config import load_config
 
         cfg = load_config()
         if not cfg:
@@ -481,7 +481,7 @@ def config(ctx: click.Context) -> None:
 @click.argument('mode', type=click.Choice(['inline', 'external']))
 def config_notes_editor(mode: str) -> None:
     """Set notes editor: inline (TUI TextArea) or external (uses $EDITOR)."""
-    from gtd.notion.config import load_config, save_config  # noqa: PLC0415
+    from gtd.notion.config import load_config, save_config
 
     cfg = load_config()
     cfg['notes_editor'] = mode
@@ -495,7 +495,7 @@ def config_notes_editor(mode: str) -> None:
 @cli.command()
 def tui() -> None:
     """Launch the interactive GTD TUI."""
-    from gtd.gtd_tui import run_gtd_tui  # noqa: PLC0415
+    from gtd.gtd_tui import run_gtd_tui
 
     run_gtd_tui()
 
@@ -507,7 +507,7 @@ def tui() -> None:
 def api(host: str, port: int, reload: bool) -> None:
     """Start the GTD HTTP API server (requires: pip install gtd[api])."""
     try:
-        import uvicorn  # noqa: PLC0415
+        import uvicorn
     except ImportError:
         click.echo(
             'uvicorn not installed. Run: uv pip install "gtd[api]"', err=True
