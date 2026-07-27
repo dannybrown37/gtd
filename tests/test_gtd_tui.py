@@ -4,11 +4,26 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 from textual.app import App, ComposeResult
-from textual.widgets import Label, ListItem, ListView, Static
+from textual.binding import Binding
+from textual.widgets import (
+    Label,
+    ListItem,
+    ListView,
+    Static,
+    TabbedContent,
+    TabPane,
+    Tabs,
+)
 
+import gtd.gtd_tui
+import gtd.tui
 from gtd.gtd_tui import (
+    BaseEntryContent,
+    GTDApp,
+    ListsContent,
     NextStepsContent,
     SeparatorListItem,
+    TodayContent,
     _classify_network_error,
     _open_steps_editor,
     _render_entry_detail,
@@ -280,6 +295,195 @@ class TestVimListViewRepopulate:
         highlighted, index = asyncio.run(run())
         assert index is None
         assert highlighted == [False, False]
+
+
+class TestVimListViewJumps:
+    """G / gg must move the highlight, not just scroll the viewport.
+
+    The original bindings pointed at scroll_end/scroll_home, which move the
+    scroll offset and leave index untouched.
+    """
+
+    def _press(
+        self,
+        items: list[ListItem],
+        *keys: str,
+    ) -> tuple[int | None, list[bool]]:
+        async def run() -> tuple[int | None, list[bool]]:
+            app = _ListHost()
+            async with app.run_test() as pilot:
+                lv = app.query_one('#lv', VimListView)
+                await repopulate(lv, items)
+                await pilot.pause()
+                await pilot.press(*keys)
+                await pilot.pause()
+                return lv.index, [i.highlighted for i in lv.query(ListItem)]
+
+        return asyncio.run(run())
+
+    def test_shift_g_highlights_last_item(self):
+        index, highlighted = self._press(_items(4), 'G')
+        assert index == 3
+        assert highlighted == [False, False, False, True]
+
+    def test_shift_g_skips_trailing_separator(self):
+        items = [*_items(3), SeparatorListItem('End')]
+        index, highlighted = self._press(items, 'G')
+        assert index == 2
+        assert highlighted == [False, False, True, False]
+
+    def test_gg_returns_to_first_item(self):
+        index, highlighted = self._press(_items(4), 'G', 'g', 'g')
+        assert index == 0
+        assert highlighted == [True, False, False, False]
+
+    def test_gg_skips_leading_separator(self):
+        index, highlighted = self._press(
+            _items(3, separator_first=True), 'G', 'g', 'g'
+        )
+        assert index == 1
+        assert highlighted == [False, True, False, False]
+
+    def test_single_g_does_not_jump(self):
+        index, _ = self._press(_items(4), 'G', 'g')
+        assert index == 3
+
+    def test_interrupted_g_does_not_jump(self):
+        index, _ = self._press(_items(4), 'G', 'g', 'k', 'g')
+        assert index == 2
+
+    @pytest.mark.parametrize('keys', [('G',), ('g', 'g')])
+    def test_empty_list_is_a_no_op(self, keys):
+        index, highlighted = self._press([], *keys)
+        assert index is None
+        assert highlighted == []
+
+    @pytest.mark.parametrize('keys', [('G',), ('g', 'g')])
+    def test_all_separators_highlights_nothing(self, keys):
+        items = [SeparatorListItem('A'), SeparatorListItem('B')]
+        index, highlighted = self._press(items, *keys)
+        assert index is None
+        assert highlighted == [False, False]
+
+
+def _declared_bindings(module) -> list[tuple[str, str, str, bool]]:
+    """(class name, key, action, priority) for BINDINGS declared in module.
+
+    Reads each class's own __dict__ so inherited BINDINGS aren't counted twice.
+    """
+    collected: list[tuple[str, str, str, bool]] = []
+    for obj in vars(module).values():
+        if not isinstance(obj, type):
+            continue
+        for entry in obj.__dict__.get('BINDINGS', ()):
+            if isinstance(entry, Binding):
+                keys, action, priority = (
+                    entry.key,
+                    entry.action,
+                    entry.priority,
+                )
+            else:
+                keys, action, priority = entry[0], entry[1], False
+            for key in str(keys).split(','):
+                collected.append((obj.__name__, key.strip(), action, priority))
+    return collected
+
+
+class TestVimJumpBindingsAreUncontested:
+    """Guard rail: g/G belong to the jump motions and nothing else.
+
+    A later `G`/`g` binding elsewhere would silently shadow these — and an
+    App-level priority binding would beat the focused list outright.
+    """
+
+    def _bindings_for(self, key: str) -> set[tuple[str, str]]:
+        modules = (gtd.tui, gtd.gtd_tui)
+        return {
+            (cls, action)
+            for module in modules
+            for cls, k, action, _ in _declared_bindings(module)
+            if k == key
+        }
+
+    def test_only_known_shift_g_bindings_exist(self):
+        assert self._bindings_for('G') == {
+            ('VimListView', 'cursor_bottom'),
+            ('GTDApp', 'focus_list_bottom'),
+        }
+
+    def test_only_known_g_bindings_exist(self):
+        assert self._bindings_for('g') == {
+            ('VimListView', 'cursor_top_pending'),
+        }
+
+    @pytest.mark.parametrize('key', ['g', 'G'])
+    def test_jump_keys_are_never_priority(self, key):
+        # A priority binding fires before the focused widget's own, which
+        # would break G/gg while the list itself is focused.
+        priorities = [
+            (cls, action)
+            for module in (gtd.tui, gtd.gtd_tui)
+            for cls, k, action, priority in _declared_bindings(module)
+            if k == key and priority
+        ]
+        assert priorities == []
+
+
+class TestTabBarBottomJump:
+    """G from the tab bar should enter the list and land on the last item."""
+
+    def _boot_and_press(
+        self,
+        *keys: str,
+        item_count: int = 4,
+    ) -> tuple[str | None, int | None]:
+        async def run() -> tuple[str | None, int | None]:
+            with (
+                patch.object(BaseEntryContent, '_load_entries'),
+                patch.object(BaseEntryContent, '_load_notes'),
+                patch.object(TodayContent, '_load_entries'),
+                patch.object(ListsContent, '_load_notion_categories'),
+            ):
+                app = GTDApp()
+                async with app.run_test() as pilot:
+                    await pilot.pause()
+                    tc = app.query_one('#tabs', TabbedContent)
+                    pane = tc.query_one(f'#{tc.active}', TabPane)
+                    lv = pane.query_one(VimListView)
+                    await repopulate(lv, _items(item_count))
+                    app.query_one(Tabs).focus()
+                    await pilot.pause()
+                    await pilot.press(*keys)
+                    await pilot.pause()
+                    # `is not None`, not truthiness: Widget defines
+                    # __len__, so an empty list widget is falsy.
+                    focused = app.focused
+                    return (
+                        focused.id if focused is not None else None,
+                        lv.index,
+                    )
+
+        return asyncio.run(run())
+
+    def test_shift_g_focuses_list_at_bottom(self):
+        focused_id, index = self._boot_and_press('G')
+        assert focused_id == 'entry-list'
+        assert index == 3
+
+    def test_shift_g_then_gg_returns_to_top(self):
+        focused_id, index = self._boot_and_press('G', 'g', 'g')
+        assert focused_id == 'entry-list'
+        assert index == 0
+
+    def test_shift_g_on_empty_list_does_not_crash(self):
+        focused_id, index = self._boot_and_press('G', item_count=0)
+        assert focused_id == 'entry-list'
+        assert index is None
+
+    def test_j_still_enters_the_list(self):
+        # G must not disturb the existing tab-bar-to-list motion.
+        focused_id, _ = self._boot_and_press('j')
+        assert focused_id == 'entry-list'
 
 
 class _TabHost(App):

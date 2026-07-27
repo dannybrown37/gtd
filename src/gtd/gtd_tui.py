@@ -3796,6 +3796,7 @@ class GTDApp(App[None]):
         Binding('h', 'tab_left', '←', priority=True),
         Binding('j', 'focus_list', '↓', priority=False),
         Binding('k', 'focus_list_up', '↑', priority=False),
+        Binding('G', 'focus_list_bottom', show=False, priority=False),
         Binding('l', 'tab_right', '→', priority=True),
         Binding('tab', 'tab_right', 'Switch Pane', priority=False),
         Binding('down', 'focus_list', show=False),
@@ -3860,6 +3861,15 @@ class GTDApp(App[None]):
             lv = pane.query_one(VimListView)
             lv.focus()
             lv.action_cursor_up()
+
+    def action_focus_list_bottom(self) -> None:
+        """Focus active tab's list and jump to the last item."""
+        tc = self.query_one('#tabs', TabbedContent)
+        with contextlib.suppress(Exception):
+            pane = tc.query_one(f'#{tc.active}', TabPane)
+            lv = pane.query_one(VimListView)
+            lv.focus()
+            lv.action_cursor_bottom()
 
     def action_capture(self) -> None:
         """Capture a new item — available from anywhere in the app."""
