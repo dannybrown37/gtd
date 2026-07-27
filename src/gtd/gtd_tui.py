@@ -2008,44 +2008,9 @@ class TodayContent(BaseEntryContent):
         inbox_entries: list[ProjectEntry] = []
         inbox_count = 0
         try:
-            from gtd.notion.client import query_database
+            from gtd.notion.triage import get_inbox_entries
 
-            inbox_filter = {
-                'or': [
-                    {'property': 'Status', 'select': {'equals': 'Triage'}},
-                    {'property': 'Status', 'select': {'is_empty': True}},
-                    {'property': 'Context', 'select': {'is_empty': True}},
-                    {
-                        'and': [
-                            {
-                                'property': 'Status',
-                                'select': {'does_not_equal': 'List'},
-                            },
-                            {
-                                'property': 'Next Actionable Step',
-                                'rich_text': {'is_empty': True},
-                            },
-                        ]
-                    },
-                    {
-                        'and': [
-                            {
-                                'property': 'Status',
-                                'select': {'does_not_equal': 'List'},
-                            },
-                            {
-                                'property': 'Success Condition',
-                                'rich_text': {'is_empty': True},
-                            },
-                        ]
-                    },
-                ]
-            }
-            pages = await loop.run_in_executor(
-                None,
-                lambda: query_database(filter_obj=inbox_filter),
-            )
-            inbox_entries = [ProjectEntry.from_page(p) for p in pages]
+            inbox_entries = await loop.run_in_executor(None, get_inbox_entries)
             inbox_count = len(inbox_entries)
         except Exception:
             inbox_count = 0
@@ -2563,38 +2528,9 @@ class InboxContent(BaseEntryContent):
         return None
 
     def _build_filter(self) -> dict:
-        return {
-            'and': [
-                {
-                    'property': 'Status',
-                    'select': {'does_not_equal': 'List'},
-                },
-                {
-                    'or': [
-                        {
-                            'property': 'Status',
-                            'select': {'equals': 'Triage'},
-                        },
-                        {
-                            'property': 'Status',
-                            'select': {'is_empty': True},
-                        },
-                        {
-                            'property': 'Context',
-                            'select': {'is_empty': True},
-                        },
-                        {
-                            'property': 'Next Actionable Step',
-                            'rich_text': {'is_empty': True},
-                        },
-                        {
-                            'property': 'Success Condition',
-                            'rich_text': {'is_empty': True},
-                        },
-                    ],
-                },
-            ],
-        }
+        from gtd.notion.triage import inbox_filter
+
+        return inbox_filter()
 
     def seed_entries(self, entries: list[ProjectEntry]) -> None:
         """Pre-populate entries (e.g. from weekly review flow)."""

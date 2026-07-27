@@ -20,7 +20,7 @@ from gtd.notion.log import (
 )
 from gtd.notion.models import ProjectEntry
 from gtd.notion.entries import _get_today_entries
-from gtd.notion.triage import _get_triage_entries
+from gtd.notion.triage import get_inbox_entries, inbox_filter
 
 
 # --- _handle_response: maps HTTP codes to actionable errors ---
@@ -201,7 +201,7 @@ class TestTriageCatchesInvisibleItems:
     it won't show in Today. But it should never reach that state
     silently -- either it's in Triage (awaiting processing) or it
     has no status (just captured). Both cases are caught by
-    _get_triage_entries.
+    get_inbox_entries.
     """
 
     @patch('gtd.notion.triage.query_database')
@@ -209,7 +209,7 @@ class TestTriageCatchesInvisibleItems:
         mock_db.return_value = [
             _make_triage_page(header='Needs processing', status='Triage'),
         ]
-        results = _get_triage_entries()
+        results = get_inbox_entries()
         assert len(results) == 1
         assert results[0].header == 'Needs processing'
 
@@ -218,7 +218,7 @@ class TestTriageCatchesInvisibleItems:
         mock_db.return_value = [
             _make_triage_page(header='Just captured', status=''),
         ]
-        results = _get_triage_entries()
+        results = get_inbox_entries()
         assert len(results) == 1
         assert results[0].header == 'Just captured'
 
@@ -362,7 +362,7 @@ class TestProjectEntryFromPage:
         assert entry.success_condition == ''
 
 
-# --- _get_triage_entries: items missing ISO appear for triage ---
+# --- get_inbox_entries: items missing ISO appear for triage ---
 
 
 class TestTriageIncludesItemsMissingISO:
@@ -378,7 +378,7 @@ class TestTriageIncludesItemsMissingISO:
                 success_condition='',
             ),
         ]
-        results = _get_triage_entries()
+        results = get_inbox_entries()
         assert len(results) == 1
         assert results[0].header == 'No outcome set'
 
@@ -386,15 +386,99 @@ class TestTriageIncludesItemsMissingISO:
     def test_filter_includes_iso_condition(self, mock_db):
         """The query sent to Notion must include an ISO-empty condition."""
         mock_db.return_value = []
-        _get_triage_entries()
-        call_kwargs = mock_db.call_args.kwargs
-        filter_obj = call_kwargs.get('filter_obj', {})
-        conditions = filter_obj.get('or', [])
-        iso_condition = {
-            'property': 'Success Condition',
-            'rich_text': {'is_empty': True},
-        }
-        assert iso_condition in conditions
+        get_inbox_entries()
+        filter_obj = mock_db.call_args.kwargs.get('filter_obj', {})
+        assert matches_notion_filter(
+            filter_obj,
+            {
+                'Status': 'Current Project',
+                'Context': 'Work',
+                'Next Actionable Step': 'Do something',
+                'Success Condition': '',
+            },
+        )
+
+
+# --- inbox_filter: one definition shared by every inbox surface ---
+
+
+def matches_notion_filter(filter_obj: dict, props: dict[str, str]) -> bool:
+    """Minimal local evaluator for the Notion filter shapes we emit."""
+    if 'and' in filter_obj:
+        return all(matches_notion_filter(f, props) for f in filter_obj['and'])
+    if 'or' in filter_obj:
+        return any(matches_notion_filter(f, props) for f in filter_obj['or'])
+    value = props.get(filter_obj['property'], '')
+    condition = filter_obj.get('select') or filter_obj['rich_text']
+    if 'is_empty' in condition:
+        return not value
+    if 'equals' in condition:
+        return value == condition['equals']
+    return value != condition['does_not_equal']
+
+
+def _props(
+    *,
+    status: str = 'Current Project',
+    context: str = 'Work',
+    next_step: str = 'Do it',
+    success_condition: str = 'Done',
+    list_category: str = '',
+) -> dict[str, str]:
+    return {
+        'Status': status,
+        'Context': context,
+        'Next Actionable Step': next_step,
+        'Success Condition': success_condition,
+        'List Category': list_category,
+    }
+
+
+class TestInboxFilter:
+    @pytest.mark.parametrize(
+        ('description', 'props', 'expected'),
+        [
+            ('triage status', _props(status='Triage'), True),
+            ('no status', _props(status=''), True),
+            ('missing context', _props(context=''), True),
+            ('missing next step', _props(next_step=''), True),
+            ('missing ISO', _props(success_condition=''), True),
+            ('fully processed', _props(), False),
+            (
+                'categorized list item has no context',
+                _props(status='List', context='', list_category='Books'),
+                False,
+            ),
+            (
+                'categorized list item has no next step or ISO',
+                _props(
+                    status='List',
+                    context='',
+                    next_step='',
+                    success_condition='',
+                    list_category='Books',
+                ),
+                False,
+            ),
+            (
+                'uncategorized list item',
+                _props(status='List', list_category=''),
+                True,
+            ),
+        ],
+    )
+    def test_membership(
+        self, description: str, props: dict[str, str], expected: bool
+    ):
+        assert matches_notion_filter(inbox_filter(), props) is expected, (
+            description
+        )
+
+    def test_inbox_tab_uses_the_shared_filter(self):
+        """Weekly review triage list must equal the Inbox tab."""
+        from gtd.gtd_tui import InboxContent
+
+        assert InboxContent._build_filter(None) == inbox_filter()  # noqa: SLF001
 
 
 # --- _entry_preview_text: outcome shown in fzf preview ---
