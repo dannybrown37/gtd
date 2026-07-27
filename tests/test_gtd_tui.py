@@ -4,7 +4,12 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 from textual.app import App, ComposeResult
-from textual.widgets import Label, ListItem, ListView, Static
+from textual.widgets import (
+    Label,
+    ListItem,
+    ListView,
+    Static,
+)
 
 from gtd.gtd_tui import (
     NextStepsContent,
