@@ -282,6 +282,75 @@ class TestVimListViewRepopulate:
         assert highlighted == [False, False]
 
 
+class TestVimListViewJumps:
+    """G / gg must move the highlight, not just scroll the viewport.
+
+    The original bindings pointed at scroll_end/scroll_home, which move the
+    scroll offset and leave index untouched.
+    """
+
+    def _press(
+        self,
+        items: list[ListItem],
+        *keys: str,
+    ) -> tuple[int | None, list[bool]]:
+        async def run() -> tuple[int | None, list[bool]]:
+            app = _ListHost()
+            async with app.run_test() as pilot:
+                lv = app.query_one('#lv', VimListView)
+                await repopulate(lv, items)
+                await pilot.pause()
+                await pilot.press(*keys)
+                await pilot.pause()
+                return lv.index, [i.highlighted for i in lv.query(ListItem)]
+
+        return asyncio.run(run())
+
+    def test_shift_g_highlights_last_item(self):
+        index, highlighted = self._press(_items(4), 'G')
+        assert index == 3
+        assert highlighted == [False, False, False, True]
+
+    def test_shift_g_skips_trailing_separator(self):
+        items = [*_items(3), SeparatorListItem('End')]
+        index, highlighted = self._press(items, 'G')
+        assert index == 2
+        assert highlighted == [False, False, True, False]
+
+    def test_gg_returns_to_first_item(self):
+        index, highlighted = self._press(_items(4), 'G', 'g', 'g')
+        assert index == 0
+        assert highlighted == [True, False, False, False]
+
+    def test_gg_skips_leading_separator(self):
+        index, highlighted = self._press(
+            _items(3, separator_first=True), 'G', 'g', 'g'
+        )
+        assert index == 1
+        assert highlighted == [False, True, False, False]
+
+    def test_single_g_does_not_jump(self):
+        index, _ = self._press(_items(4), 'G', 'g')
+        assert index == 3
+
+    def test_interrupted_g_does_not_jump(self):
+        index, _ = self._press(_items(4), 'G', 'g', 'k', 'g')
+        assert index == 2
+
+    @pytest.mark.parametrize('keys', [('G',), ('g', 'g')])
+    def test_empty_list_is_a_no_op(self, keys):
+        index, highlighted = self._press([], *keys)
+        assert index is None
+        assert highlighted == []
+
+    @pytest.mark.parametrize('keys', [('G',), ('g', 'g')])
+    def test_all_separators_highlights_nothing(self, keys):
+        items = [SeparatorListItem('A'), SeparatorListItem('B')]
+        index, highlighted = self._press(items, *keys)
+        assert index is None
+        assert highlighted == [False, False]
+
+
 class _TabHost(App):
     def __init__(self, content) -> None:
         super().__init__()

@@ -382,7 +382,7 @@ async def repopulate(lv: ListView, items: Iterable[ListItem]) -> None:
 
 
 class VimListView(ListView):
-    """ListView with j/k/G/g vim-style navigation.
+    """ListView with j/k/G/gg vim-style navigation.
 
     Pressing k at the top posts FocusTabBar so the parent can send focus
     to the tab bar; j is handled normally by ListView.
@@ -396,16 +396,36 @@ class VimListView(ListView):
         Binding('j', 'cursor_down', show=False),
         Binding('k', 'cursor_up_or_tabs', show=False),
         Binding('up', 'cursor_up_or_tabs', show=False),
-        Binding('G', 'scroll_end', show=False),
-        Binding('g', 'scroll_home', show=False),
+        Binding('G', 'cursor_bottom', show=False),
+        Binding('g', 'cursor_top_pending', show=False),
     ]
 
+    _awaiting_second_g: bool = False
+
+    def enabled_indices(self) -> list[int]:
+        return [i for i, child in enumerate(self._nodes) if not child.disabled]
+
+    def on_key(self, event: Key) -> None:
+        if event.key != 'g':
+            self._awaiting_second_g = False
+
     def action_cursor_up_or_tabs(self) -> None:
-        first_enabled = next(
-            (i for i, child in enumerate(self._nodes) if not child.disabled),
-            0,
-        )
+        enabled = self.enabled_indices()
+        first_enabled = enabled[0] if enabled else 0
         if self.index is None or self.index <= first_enabled:
             self.post_message(self.FocusTabBar())
         else:
             self.action_cursor_up()
+
+    def action_cursor_bottom(self) -> None:
+        self._awaiting_second_g = False
+        if enabled := self.enabled_indices():
+            self.index = enabled[-1]
+
+    def action_cursor_top_pending(self) -> None:
+        if not self._awaiting_second_g:
+            self._awaiting_second_g = True
+            return
+        self._awaiting_second_g = False
+        if enabled := self.enabled_indices():
+            self.index = enabled[0]

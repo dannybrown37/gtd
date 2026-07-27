@@ -124,7 +124,7 @@ Two-mode design: opens in **browse mode** (ListView focused, j/k navigate). **Ta
 
 ## Textual Conventions
 
-- `VimListView(ListView)` — adds j/k/G/g bindings; k at index 0 posts `FocusTabBar`
+- `VimListView(ListView)` — adds j/k/G/gg bindings; k at index 0 posts `FocusTabBar`. `G`/`gg` move the *highlight* to the last/first enabled item (skipping `SeparatorListItem`s), not just the scroll offset. `gg` is a two-key sequence: the first `g` sets `_awaiting_second_g`, and `on_key` clears it on any other key.
 - `DetailPane(ScrollableContainer)` — `can_focus = False` so Tab skips it
 - `SeparatorListItem(ListItem)` — `disabled=True`, used as visual dividers; supports markup in label
 - `WeeklyHabitItem(ListItem)` — habit reminder item with `habit_key` and `habit_label` attrs
