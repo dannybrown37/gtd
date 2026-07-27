@@ -308,7 +308,10 @@ class TestFilterRebuildHighlight:
                 _entry(page_id='b', header='Bravo', context='Work'),
                 _entry(page_id='c', header='Charlie', context='Work'),
             ]
-            with patch.object(NextStepsContent, '_load_entries'):
+            with (
+                patch.object(NextStepsContent, '_load_entries'),
+                patch.object(NextStepsContent, '_load_notes'),
+            ):
                 async with app.run_test() as pilot:
                     await content._set_entries(entries)  # noqa: SLF001
                     await pilot.pause()
