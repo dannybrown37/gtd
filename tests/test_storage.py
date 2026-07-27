@@ -6,6 +6,7 @@ import pytest
 
 from gtd import storage
 from gtd.storage import (
+    _current_week_start,
     get_weekly_habit_date,
     load_areas,
     load_review_state,
@@ -20,12 +21,10 @@ from gtd.storage import (
 def _isolated_storage(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Redirect all storage paths to a temp directory."""
     monkeypatch.setattr(storage, 'OUTPUT_PATH', tmp_path)
-    monkeypatch.setattr(storage, 'CONFIG_PATH', tmp_path / 'config.json')
     monkeypatch.setattr(
         storage, 'HABITS_PATH', tmp_path / 'weekly_habits.json'
     )
     monkeypatch.setattr(storage, 'AREAS_PATH', tmp_path / 'areas.json')
-    (tmp_path / 'archive').mkdir()
 
 
 class TestWeeklyHabitDate:
@@ -151,3 +150,103 @@ class TestReviewState:
 
     def test_reset_is_noop_when_file_missing(self) -> None:
         reset_review_state()  # should not raise
+
+    def test_save_preserves_habit_completion_dates(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Review state and habit dates share one file — neither wins.
+
+        Both live in weekly_habits.json. If save_review_state stopped
+        merging, finishing a review step would wipe the record of every
+        habit already completed this week.
+        """
+        monkeypatch.setattr(
+            storage, '_current_week_start', lambda: '2026-07-06'
+        )
+        set_weekly_habit_date('weekly_review')
+        save_review_state([True, False])
+
+        assert (
+            get_weekly_habit_date('weekly_review')
+            == datetime.now().date().isoformat()
+        )
+        assert load_review_state(2) == [True, False]
+
+    def test_set_habit_date_preserves_review_state(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The same merge contract in the other direction."""
+        monkeypatch.setattr(
+            storage, '_current_week_start', lambda: '2026-07-06'
+        )
+        save_review_state([True, True])
+        set_weekly_habit_date('weekly_review')
+
+        assert load_review_state(2) == [True, True]
+
+    def test_reset_clears_the_weekly_review_marker(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            storage, '_current_week_start', lambda: '2026-07-06'
+        )
+        set_weekly_habit_date('weekly_review')
+        save_review_state([True, False])
+        reset_review_state()
+
+        data = json.loads(storage.HABITS_PATH.read_text())
+        assert 'review_state' not in data
+        assert 'weekly_review' not in data
+
+    def test_reset_leaves_unrelated_habits_alone(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            storage, '_current_week_start', lambda: '2026-07-06'
+        )
+        set_weekly_habit_date('other_habit')
+        save_review_state([True])
+        reset_review_state()
+
+        assert (
+            get_weekly_habit_date('other_habit')
+            == datetime.now().date().isoformat()
+        )
+
+
+# ── _current_week_start: drives the Monday reset ─────────────────────────────
+
+
+class TestCurrentWeekStart:
+    @pytest.mark.parametrize(
+        ('today', 'expected_monday'),
+        [
+            ('2026-07-27', '2026-07-27'),  # Monday
+            ('2026-07-28', '2026-07-27'),  # Tuesday
+            ('2026-07-31', '2026-07-27'),  # Friday
+            ('2026-08-01', '2026-07-27'),  # Saturday
+            ('2026-08-02', '2026-07-27'),  # Sunday
+            ('2026-08-03', '2026-08-03'),  # next Monday
+        ],
+    )
+    def test_resolves_to_the_containing_monday(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        today: str,
+        expected_monday: str,
+    ) -> None:
+        """Sunday must still belong to the week that began Monday.
+
+        Getting this off by a day would reset a half-finished weekly
+        review on Sunday instead of Monday.
+        """
+        fixed = datetime.fromisoformat(today)
+
+        class _FixedDatetime(datetime):
+            @classmethod
+            def now(cls, tz: object = None) -> datetime:  # noqa: ARG003
+                return fixed
+
+        monkeypatch.setattr(storage, 'datetime', _FixedDatetime)
+
+        assert _current_week_start() == expected_monday

@@ -56,7 +56,7 @@ The Today tab has three sections in the left list:
 
 **T** triages selected entry, **A** triages all — both use TUI modals (no fzf). `_triage_one()` chains: `SelectModal(status)` → `SelectModal(context)` → `InputModal(next step)` → `InputModal(due date)` → `InputModal(follow-up)`. Core logic is in `triage_entries(entries)` (public, no `@work`); `action_triage_all` wraps it with `@work`.
 
-**Triage context for "List" status** uses `load_list_categories(LIST_CONTEXTS)` — the same source as the Lists tab — not Notion's raw context options.
+**Triage context for "List" status** uses `get_list_categories()` (`notion/client.py`), which reads the `List Category` select options from Notion — the same source as the Lists tab, not Notion's Context options. The CLI triage flow (`notion/triage.py`) reads the same function.
 
 ### Waiting For tab (Weekly Review)
 
@@ -97,7 +97,7 @@ Two-mode design: opens in **browse mode** (ListView focused, j/k navigate). **Ta
 | GTD projects/inbox | Notion database | `NOTION_PROJECTS_DB_ID` env var |
 | Weekly habit completion | Local JSON | `~/.local/share/gtd/weekly_habits.json` |
 | Areas of Focus | Local JSON | `~/.local/share/gtd/areas.json` |
-| List categories | Local JSON | `~/.local/share/gtd/list_categories.json` |
+| List categories | Notion select options | `List Category` property on the projects DB |
 | GTD config | Local JSON | `~/.config/gtd/config.json` |
 
 ## Areas of Focus
