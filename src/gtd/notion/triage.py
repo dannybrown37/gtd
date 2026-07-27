@@ -24,27 +24,50 @@ from gtd.ui import CancelAction, fzf_on_a_list, prompt_input
 TRIAGE_STATUSES = [s for s in ALL_STATUSES if s != 'Triage'] + ['Delete']
 
 
-def _get_triage_entries() -> list[ProjectEntry]:
-    """Fetch items needing triage: no/Triage status, or missing fields."""
-    pages = query_database(
-        filter_obj={
-            'or': [
-                {'property': 'Status', 'select': {'equals': 'Triage'}},
-                {'property': 'Status', 'select': {'is_empty': True}},
-                {'property': 'Context', 'select': {'is_empty': True}},
-                {
-                    'property': 'Next Actionable Step',
-                    'rich_text': {'is_empty': True},
-                },
-                {
-                    'property': 'Success Condition',
-                    'rich_text': {'is_empty': True},
-                },
-            ],
+def inbox_filter() -> dict:
+    """The one definition of "inbox": items needing triage.
+
+    Every surface that shows an inbox — the TUI Inbox tab, the Weekly
+    Review, the CLI triage flow — must use this, or the counts disagree.
+
+    List items are reference material, not actions: they legitimately have
+    no context, next step, or ISO, so they only count as inbox when they
+    are missing the one field they do need, a List Category.
+    """
+    not_a_list = {'property': 'Status', 'select': {'does_not_equal': 'List'}}
+    incomplete_fields = [
+        {'property': 'Context', 'select': {'is_empty': True}},
+        {
+            'property': 'Next Actionable Step',
+            'rich_text': {'is_empty': True},
         },
-    )
-    entries = [ProjectEntry.from_page(p) for p in pages]
-    return [e for e in entries if not (e.status == 'List' and e.list_category)]
+        {'property': 'Success Condition', 'rich_text': {'is_empty': True}},
+    ]
+    return {
+        'or': [
+            {'property': 'Status', 'select': {'equals': 'Triage'}},
+            {'property': 'Status', 'select': {'is_empty': True}},
+            *(
+                {'and': [not_a_list, condition]}
+                for condition in incomplete_fields
+            ),
+            {
+                'and': [
+                    {'property': 'Status', 'select': {'equals': 'List'}},
+                    {
+                        'property': 'List Category',
+                        'select': {'is_empty': True},
+                    },
+                ],
+            },
+        ],
+    }
+
+
+def get_inbox_entries() -> list[ProjectEntry]:
+    """Fetch items needing triage: no/Triage status, or missing fields."""
+    pages = query_database(filter_obj=inbox_filter())
+    return [ProjectEntry.from_page(p) for p in pages]
 
 
 def _process_single_entry(entry: ProjectEntry) -> bool:  # noqa: C901, PLR0911, PLR0912, PLR0915
@@ -191,7 +214,7 @@ def _process_single_entry(entry: ProjectEntry) -> bool:  # noqa: C901, PLR0911, 
 
 def process_triage() -> None:
     """Interactive triage processing flow."""
-    entries = _get_triage_entries()
+    entries = get_inbox_entries()
     if not entries:
         print('No items in Triage. Inbox zero! 🎉')
         return

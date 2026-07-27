@@ -18,7 +18,7 @@ from gtd.notion.entries import (
 )
 from gtd.notion.log import _confirm_delete
 from gtd.notion.models import ProjectEntry
-from gtd.notion.triage import _get_triage_entries, process_triage
+from gtd.notion.triage import get_inbox_entries, process_triage
 from gtd.ui import fzf_on_a_list, pause
 
 
@@ -119,7 +119,7 @@ def _review_get_clear() -> None:
     print('─── Phase 1: Get Clear ───')
     print('  Goal: Empty your inbox. Process every item.\n')
 
-    triage_items = _get_triage_entries()
+    triage_items = get_inbox_entries()
     if triage_items:
         summary_lines = [
             f'── Triage Inbox ({len(triage_items)} items) ──',
