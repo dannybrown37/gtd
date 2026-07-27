@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, ClassVar
 
 if TYPE_CHECKING:
     from textual.events import Key
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterable
 
 from textual import on, work
 from textual.app import App, ComposeResult
@@ -46,6 +46,7 @@ from gtd.tui import (
     SelectModal,
     TwoFieldModal,
     VimListView,
+    repopulate,
 )
 
 
@@ -435,6 +436,21 @@ class NextStepListItem(EntryListItem):
         yield Label(self._text, markup=True)
 
 
+def _context_grouped_items(
+    entries: Iterable[ProjectEntry],
+    item_cls: type[EntryListItem],
+) -> list[ListItem]:
+    items: list[ListItem] = []
+    current_ctx: str | None = None
+    for entry in entries:
+        ctx = entry.context or ''
+        if ctx != current_ctx:
+            current_ctx = ctx
+            items.append(SeparatorListItem(ctx or '(no context)'))
+        items.append(item_cls(entry))
+    return items
+
+
 class DetailPane(ScrollableContainer):
     """Scrollable detail pane — focusable for keyboard scrolling."""
 
@@ -821,14 +837,12 @@ class BaseEntryContent(Vertical):
             )
             self.app.call_from_thread(self._set_entries, [])
 
-    def _set_entries(self, entries: list[ProjectEntry]) -> None:
+    async def _set_entries(self, entries: list[ProjectEntry]) -> None:
         self._entries = entries
         with contextlib.suppress(Exception):
             self.query_one('#entry-loading', LoadingIndicator).display = False
         lv = self.query_one('#entry-list', VimListView)
-        lv.clear()
-        for entry in entries:
-            lv.append(EntryListItem(entry))
+        await repopulate(lv, (EntryListItem(entry) for entry in entries))
         header = self.query_one('#entry-list-header', Static)
         detail = self.query_one('#entry-detail', Static)
         if not entries:
@@ -836,7 +850,6 @@ class BaseEntryContent(Vertical):
             detail.update(f'[dim]{self.EMPTY_MSG}[/dim]')
         else:
             header.update(f'{self.TITLE}  [dim]({len(entries)})[/dim]')
-            lv.index = 0
             self._update_detail()
 
     @on(ListView.Highlighted, '#entry-list')
@@ -1902,20 +1915,18 @@ class TodayContent(BaseEntryContent):
             )
             self.app.call_from_thread(self._set_entries, [])
 
-    def _populate_list(
+    async def _populate_list(
         self,
         lv: VimListView,
         entries: list[ProjectEntry],
     ) -> None:
-        lv.clear()
-        for item in self._habit_items:
-            lv.append(item)
+        items: list[ListItem] = list(self._habit_items)
         if self._habit_items and entries:
-            lv.append(SeparatorListItem('GTD'))
-        for entry in entries:
-            lv.append(NextStepListItem(entry))
+            items.append(SeparatorListItem('GTD'))
+        items.extend(NextStepListItem(entry) for entry in entries)
+        await repopulate(lv, items)
 
-    def _set_entries(self, entries: list[ProjectEntry]) -> None:
+    async def _set_entries(self, entries: list[ProjectEntry]) -> None:
         self._entries = entries
         with contextlib.suppress(Exception):
             self.query_one('#entry-loading', LoadingIndicator).display = False
@@ -1927,7 +1938,7 @@ class TodayContent(BaseEntryContent):
         ]
 
         lv = self.query_one('#entry-list', VimListView)
-        self._populate_list(lv, entries)
+        await self._populate_list(lv, entries)
 
         header = self.query_one('#entry-list-header', Static)
         detail = self.query_one('#entry-detail', Static)
@@ -1937,7 +1948,6 @@ class TodayContent(BaseEntryContent):
             detail.update('[dim]All clear. Nice work.[/dim]')
         else:
             header.update(f'Today  [dim]({len(entries)})[/dim]')
-            lv.index = 0
             self._update_detail()
 
     @on(ListView.Highlighted, '#entry-list')
@@ -2936,7 +2946,7 @@ class ProjectsContent(BaseEntryContent):
             ],
         }
 
-    def _set_entries(self, entries: list[ProjectEntry]) -> None:
+    async def _set_entries(self, entries: list[ProjectEntry]) -> None:
         entries.sort(
             key=lambda e: (
                 e.context or '\xff',
@@ -2947,14 +2957,7 @@ class ProjectsContent(BaseEntryContent):
         with contextlib.suppress(Exception):
             self.query_one('#entry-loading', LoadingIndicator).display = False
         lv = self.query_one('#entry-list', VimListView)
-        lv.clear()
-        current_ctx: str | None = None
-        for entry in entries:
-            ctx = entry.context or ''
-            if ctx != current_ctx:
-                current_ctx = ctx
-                lv.append(SeparatorListItem(ctx or '(no context)'))
-            lv.append(EntryListItem(entry))
+        await repopulate(lv, _context_grouped_items(entries, EntryListItem))
         header = self.query_one('#entry-list-header', Static)
         detail = self.query_one('#entry-detail', Static)
         if not entries:
@@ -2962,7 +2965,6 @@ class ProjectsContent(BaseEntryContent):
             detail.update(f'[dim]{self.EMPTY_MSG}[/dim]')
         else:
             header.update(f'{self.TITLE}  [dim]({len(entries)})[/dim]')
-            lv.index = 0
             self._update_detail()
 
     def _current_entry(self) -> ProjectEntry | None:
@@ -3022,24 +3024,19 @@ class NextStepsContent(BaseEntryContent):
             return [e for e in self._entries if e.context == self._ctx_filter]
         return self._entries
 
-    def _set_entries(self, entries: list[ProjectEntry]) -> None:
+    async def _set_entries(self, entries: list[ProjectEntry]) -> None:
         entries.sort(key=lambda e: (e.context or '\xff', e.header.lower()))
         self._entries = entries
         with contextlib.suppress(Exception):
             self.query_one('#entry-loading', LoadingIndicator).display = False
-        self._rebuild_list()
+        await self._rebuild_list()
 
-    def _rebuild_list(self) -> None:
+    async def _rebuild_list(self) -> None:
         filtered = self._filtered_entries()
         lv = self.query_one('#entry-list', VimListView)
-        lv.clear()
-        current_ctx: str | None = None
-        for entry in filtered:
-            ctx = entry.context or ''
-            if ctx != current_ctx:
-                current_ctx = ctx
-                lv.append(SeparatorListItem(ctx or '(no context)'))
-            lv.append(NextStepListItem(entry))
+        await repopulate(
+            lv, _context_grouped_items(filtered, NextStepListItem)
+        )
 
         detail = self.query_one('#entry-detail', Static)
         header = self.query_one('#entry-list-header', Static)
@@ -3058,7 +3055,6 @@ class NextStepsContent(BaseEntryContent):
             detail.update(f'[dim]{self.EMPTY_MSG}[/dim]')
         else:
             header.update(f'{self.TITLE}  [dim]{count}[/dim]{ctx_badge}')
-            lv.index = 0
             self._update_detail()
 
     def _current_entry(self) -> ProjectEntry | None:
@@ -3079,7 +3075,7 @@ class NextStepsContent(BaseEntryContent):
         if choice is None:
             return
         self._ctx_filter = None if choice == '(All)' else choice
-        self._rebuild_list()
+        await self._rebuild_list()
 
     @work
     async def action_edit_steps(self) -> None:
@@ -3115,9 +3111,9 @@ class RecurringContent(BaseEntryContent):
     def _build_filter(self) -> dict:
         return {'property': 'Status', 'select': {'equals': 'Recurring'}}
 
-    def _set_entries(self, entries: list[ProjectEntry]) -> None:
+    async def _set_entries(self, entries: list[ProjectEntry]) -> None:
         entries = sorted(entries, key=lambda e: e.follow_up_date or '\xff')
-        super()._set_entries(entries)
+        await super()._set_entries(entries)
 
 
 # ── Waiting For content ──────────────────────────────────────────────────────
@@ -3166,7 +3162,7 @@ class SomedayContent(BaseEntryContent):
             'select': {'equals': 'Someday/Maybe'},
         }
 
-    def _set_entries(self, entries: list[ProjectEntry]) -> None:
+    async def _set_entries(self, entries: list[ProjectEntry]) -> None:
         entries.sort(
             key=lambda e: (
                 e.context or '\xff',
@@ -3177,14 +3173,7 @@ class SomedayContent(BaseEntryContent):
         with contextlib.suppress(Exception):
             self.query_one('#entry-loading', LoadingIndicator).display = False
         lv = self.query_one('#entry-list', VimListView)
-        lv.clear()
-        current_ctx: str | None = None
-        for entry in entries:
-            ctx = entry.context or ''
-            if ctx != current_ctx:
-                current_ctx = ctx
-                lv.append(SeparatorListItem(ctx or '(no context)'))
-            lv.append(EntryListItem(entry))
+        await repopulate(lv, _context_grouped_items(entries, EntryListItem))
         header = self.query_one('#entry-list-header', Static)
         detail = self.query_one('#entry-detail', Static)
         if not entries:
@@ -3192,7 +3181,6 @@ class SomedayContent(BaseEntryContent):
             detail.update(f'[dim]{self.EMPTY_MSG}[/dim]')
         else:
             header.update(f'{self.TITLE}  [dim]({len(entries)})[/dim]')
-            lv.index = 0
             self._update_detail()
 
     def _current_entry(self) -> ProjectEntry | None:
@@ -3325,14 +3313,14 @@ class ListsContent(BaseEntryContent):
     def _build_filter(self) -> dict:
         return {'property': 'Status', 'select': {'equals': 'List'}}
 
-    def _set_entries(self, entries: list[ProjectEntry]) -> None:
+    async def _set_entries(self, entries: list[ProjectEntry]) -> None:
         entries.sort(
             key=lambda e: (e.list_category or '\xff', e.header.lower())
         )
         self._entries = entries
         with contextlib.suppress(Exception):
             self.query_one('#entry-loading', LoadingIndicator).display = False
-        self._rebuild_list()
+        await self._rebuild_list()
 
     def _all_categories(self) -> list[str]:
         """Return all list categories from Notion + any extras from entries."""
@@ -3344,7 +3332,7 @@ class ListsContent(BaseEntryContent):
         )
         return sorted(self._notion_categories) + list(dict.fromkeys(extras))
 
-    def _rebuild_list(self) -> None:
+    async def _rebuild_list(self) -> None:
         categories = (
             [self._list_filter]
             if self._list_filter
@@ -3354,16 +3342,17 @@ class ListsContent(BaseEntryContent):
         for e in self._entries:
             by_cat.setdefault(e.list_category or '', []).append(e)
 
-        lv = self.query_one('#entry-list', VimListView)
-        lv.clear()
+        rows: list[ListItem] = []
         for cat in categories:
             items = by_cat.get(cat, [])
             items.sort(key=lambda e: (e.success_condition or '\xff', e.header))
             n = len(items)
             label = f'{cat}  ({n})' if n else f'{cat}  [dim](empty)[/dim]'
-            lv.append(SeparatorListItem(label))
-            for entry in items:
-                lv.append(ListEntryListItem(entry))
+            rows.append(SeparatorListItem(label))
+            rows.extend(ListEntryListItem(entry) for entry in items)
+
+        lv = self.query_one('#entry-list', VimListView)
+        await repopulate(lv, rows)
 
         total = len(self._entries)
         shown = sum(len(by_cat.get(c, [])) for c in categories)
@@ -3376,7 +3365,6 @@ class ListsContent(BaseEntryContent):
         count = f'({shown}/{total})' if self._list_filter else f'({total})'
         header.update(f'{self.TITLE}  [dim]{count}[/dim]{ctx_badge}')
         if lv.children:
-            lv.index = 0
             self._update_detail()
 
     def _current_entry(self) -> ProjectEntry | None:
@@ -3594,7 +3582,7 @@ class ListsContent(BaseEntryContent):
             loop = asyncio.get_running_loop()
             await loop.run_in_executor(None, add_list_category, name)
             self._notion_categories = sorted([*self._notion_categories, name])
-            self._rebuild_list()
+            await self._rebuild_list()
             self.app.notify(f'✓ Added category "{name}"')
         except Exception as e:
             self.app.notify(f'Failed to add category: {e}', severity='error')
@@ -3625,7 +3613,7 @@ class ListsContent(BaseEntryContent):
             self._notion_categories = [
                 c for c in self._notion_categories if c != cat
             ]
-            self._rebuild_list()
+            await self._rebuild_list()
             self.app.notify(f'✓ Removed category "{cat}"')
         except Exception as e:
             self.app.notify(
@@ -3687,7 +3675,7 @@ class ListsContent(BaseEntryContent):
         if choice is None:
             return
         self._list_filter = None if choice == '(All)' else choice
-        self._rebuild_list()
+        await self._rebuild_list()
 
 
 def _classify_network_error(err: Exception) -> tuple[str, str]:
