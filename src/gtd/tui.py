@@ -19,6 +19,8 @@ from textual.widgets import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from textual.app import ComposeResult
     from textual.events import Key
 
@@ -238,16 +240,14 @@ class SelectModal(ModalScreen[str | None]):
         self.query_one('#new-hint', Static).display = False
 
     @on(Input.Changed, '#filter-input')
-    def filter_changed(self, event: Input.Changed) -> None:
+    async def filter_changed(self, event: Input.Changed) -> None:
         query = event.value.lower()
         self._filtered = [i for i in self._all_items if query in i.lower()]
         lv = self.query_one('#select-list', ListView)
         hint = self.query_one('#new-hint', Static)
-        lv.clear()
-        for item in self._filtered:
-            lv.append(ListItem(Label(item)))
-        if self._filtered:
-            lv.index = 0
+        await repopulate(
+            lv, (ListItem(Label(item)) for item in self._filtered)
+        )
         if self._allow_new and event.value and not self._filtered:
             hint.update(f'↵ to create new: "{event.value}"')
             hint.display = True
@@ -364,6 +364,21 @@ class DetailPane(ScrollableContainer):
         elif event.key == 'g':
             event.stop()
             self.scroll_home(animate=False)
+
+
+async def repopulate(lv: ListView, items: Iterable[ListItem]) -> None:
+    """Replace a ListView's items, highlighting the first selectable one.
+
+    `clear()` only queues the DOM removal, so an index assigned in the same
+    frame lands on the outgoing items and the incoming ones are left
+    unhighlighted. Awaiting the clear keeps the highlight on the new content.
+    """
+    await lv.clear()
+    lv.extend(items)
+    lv.index = next(
+        (i for i, child in enumerate(lv.children) if not child.disabled),
+        None,
+    )
 
 
 class VimListView(ListView):

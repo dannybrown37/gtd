@@ -2,8 +2,13 @@ import asyncio
 from unittest.mock import MagicMock, patch
 
 import httpx
+import pytest
+from textual.app import App, ComposeResult
+from textual.widgets import Label, ListItem, ListView, Static
 
 from gtd.gtd_tui import (
+    NextStepsContent,
+    SeparatorListItem,
     _classify_network_error,
     _open_steps_editor,
     _render_entry_detail,
@@ -11,6 +16,7 @@ from gtd.gtd_tui import (
 )
 from gtd.notion.models import ProjectEntry
 from gtd.notion.schema import STATUS_ICONS
+from gtd.tui import SelectModal, VimListView, repopulate
 
 
 def _entry(**kwargs) -> ProjectEntry:
@@ -173,3 +179,168 @@ class TestOpenStepsEditor:
         assert args[0] == 'vim'
         assert args[1] == '+'
         assert args[2].endswith('.md')
+
+
+class _ListHost(App):
+    def compose(self) -> ComposeResult:
+        yield VimListView(id='lv')
+
+
+def _items(n: int, *, separator_first: bool = False) -> list[ListItem]:
+    items: list[ListItem] = []
+    if separator_first:
+        items.append(SeparatorListItem('Context'))
+    items.extend(ListItem(Label(f'item{i}')) for i in range(n))
+    return items
+
+
+class TestVimListViewRepopulate:
+    """Regression coverage for the deferred-prune highlight bug.
+
+    clear() defers the DOM prune, so an index assigned in the same frame
+    highlights the outgoing items instead of the incoming ones. Only visible
+    with a single item, where j/k can't change index to re-fire the watcher.
+    """
+
+    def _repopulate_twice(
+        self,
+        n: int,
+        *,
+        separator_first: bool = False,
+    ) -> tuple[list[bool], int | None]:
+        async def run() -> tuple[list[bool], int | None]:
+            app = _ListHost()
+            async with app.run_test() as pilot:
+                lv = app.query_one('#lv', VimListView)
+                await repopulate(lv, _items(1))
+                await pilot.pause()
+                await repopulate(
+                    lv, _items(n, separator_first=separator_first)
+                )
+                await pilot.pause()
+                return (
+                    [i.highlighted for i in lv.query(ListItem)],
+                    lv.index,
+                )
+
+        return asyncio.run(run())
+
+    @pytest.mark.parametrize('n', [1, 2, 5])
+    def test_first_item_highlighted_after_refresh(self, n):
+        highlighted, index = self._repopulate_twice(n)
+        assert index == 0
+        assert highlighted == [True] + [False] * (n - 1)
+
+    @pytest.mark.parametrize('n', [1, 3])
+    def test_skips_leading_separator(self, n):
+        highlighted, index = self._repopulate_twice(n, separator_first=True)
+        assert index == 1
+        assert highlighted == [False, True] + [False] * (n - 1)
+
+    def test_stale_items_are_removed(self):
+        async def run() -> int:
+            app = _ListHost()
+            async with app.run_test() as pilot:
+                lv = app.query_one('#lv', VimListView)
+                await repopulate(lv, _items(4))
+                await pilot.pause()
+                await repopulate(lv, _items(2))
+                await pilot.pause()
+                return len(lv.query(ListItem))
+
+        assert asyncio.run(run()) == 2
+
+    def test_empty_clears_index(self):
+        async def run() -> tuple[int, int | None]:
+            app = _ListHost()
+            async with app.run_test() as pilot:
+                lv = app.query_one('#lv', VimListView)
+                await repopulate(lv, _items(3))
+                await pilot.pause()
+                await repopulate(lv, [])
+                await pilot.pause()
+                return len(lv.query(ListItem)), lv.index
+
+        assert asyncio.run(run()) == (0, None)
+
+    def test_all_separators_leaves_nothing_highlighted(self):
+        async def run() -> tuple[list[bool], int | None]:
+            app = _ListHost()
+            async with app.run_test() as pilot:
+                lv = app.query_one('#lv', VimListView)
+                await repopulate(
+                    lv, [SeparatorListItem('A'), SeparatorListItem('B')]
+                )
+                await pilot.pause()
+                return (
+                    [i.highlighted for i in lv.query(ListItem)],
+                    lv.index,
+                )
+
+        highlighted, index = asyncio.run(run())
+        assert index is None
+        assert highlighted == [False, False]
+
+
+class _TabHost(App):
+    def __init__(self, content) -> None:
+        super().__init__()
+        self._content = content
+
+    def compose(self) -> ComposeResult:
+        yield self._content
+
+
+class TestFilterRebuildHighlight:
+    """The user-facing trigger: rebuilding an already-populated list.
+
+    A refresh clears a frame ahead of the thread worker, so its list is
+    genuinely empty by repopulate time. The filter rebuilds run in a single
+    frame over live items, which is where the stale-node bug bites.
+    """
+
+    def _next_steps_highlight(self, ctx: str) -> list[bool]:
+        async def run() -> list[bool]:
+            content = NextStepsContent()
+            app = _TabHost(content)
+            entries = [
+                _entry(page_id='a', header='Alpha', context='Home'),
+                _entry(page_id='b', header='Bravo', context='Work'),
+                _entry(page_id='c', header='Charlie', context='Work'),
+            ]
+            with patch.object(NextStepsContent, '_load_entries'):
+                async with app.run_test() as pilot:
+                    await content._set_entries(entries)  # noqa: SLF001
+                    await pilot.pause()
+                    content._ctx_filter = ctx  # noqa: SLF001
+                    await content._rebuild_list()  # noqa: SLF001
+                    await pilot.pause()
+                    lv = content.query_one('#entry-list', VimListView)
+                    return [i.highlighted for i in lv.query(ListItem)]
+
+        return asyncio.run(run())
+
+    def test_single_match_is_highlighted(self):
+        # 'Home' has exactly one entry — the reported one-item case.
+        highlighted = self._next_steps_highlight('Home')
+        assert highlighted == [False, True]  # separator, then the entry
+
+    def test_multi_match_highlights_first_entry(self):
+        highlighted = self._next_steps_highlight('Work')
+        assert highlighted == [False, True, False]
+
+    def test_select_modal_filtered_to_one_is_highlighted(self):
+        async def run() -> list[bool]:
+            app = _TabHost(Static(''))
+            async with app.run_test() as pilot:
+                app.push_screen(
+                    SelectModal('Pick', ['alpha', 'beta', 'gamma'])
+                )
+                await pilot.pause()
+                await pilot.press('tab', 'b')
+                for _ in range(4):
+                    await pilot.pause()
+                lv = app.screen.query_one('#select-list', ListView)
+                return [i.highlighted for i in lv.query(ListItem)]
+
+        assert asyncio.run(run()) == [True]
