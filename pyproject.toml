@@ -1,10 +1,14 @@
 [project]
-name = "gtd"
+name = "gtd-tui"
 version = "0.2.0"
 description = "GTD + 12-Week Year CLI powered by Notion"
 readme = "README.md"
+license = "MIT"
 requires-python = ">=3.12"
 dependencies = ["click>=8.1.0", "httpx>=0.28.0", "pydantic>=2.13.4", "python-dateutil>=2.9.0.post0", "textual>=0.71.0"]
+
+[project.urls]
+Repository = "https://github.com/dannybrown37/gtd"
 
 [project.optional-dependencies]
 api = ["flask>=3.1.0"]
@@ -24,24 +28,41 @@ build-backend = "setuptools.build_meta"
 
 
 [tool.ruff]
-extend = "../config/.ruff.toml"
+line-length = 79
+show-fixes = true
 target-version = "py312"
 
 [tool.ruff.lint]
+select = [
+  "A", "ANN", "ARG", "B", "C4", "COM", "C90",
+  "D200", "D201", "D202", "D205", "D212",
+  "E", "EM", "ERA", "EXE", "F", "FBT", "G", "I", "ICN", "ISC", "N",
+  "PGH", "PIE", "PL", "PLE", "PLR", "PLW", "PT", "PTH", "PYI", "Q",
+  "RET", "RSE", "RUF", "S", "SLF", "SIM", "TCH", "TID", "TRY", "W",
+  "UP", "YTT",
+]
 ignore = [
     "S311",
     "S101",
     "I001",
     "S113",
     "PLR0913",
+    "PLC0415",
     "COM812",  # conflicts with formatter
     "FBT001",  # click uses bool positional args by design
 ]
+
+[tool.ruff.lint.flake8-quotes]
+inline-quotes = "single"
 
 [tool.ruff.lint.per-file-ignores]
 "test_*.py" = ["ANN201", "PLR2004", "ANN001", "ANN003", "ARG002", "PT019"]
 "tests/**" = ["ANN201", "PLR2004", "ANN001", "ANN003", "ARG002", "PT019"]
 "api.py" = ["ANN401"]
+
+[tool.ruff.format]
+quote-style = "single"
+docstring-code-format = true
 
 [dependency-groups]
 dev = [

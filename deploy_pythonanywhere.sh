@@ -5,17 +5,16 @@ set -euo pipefail
 
 PA_USERNAME="${PA_USERNAME:?set PA_USERNAME}"
 PA_DOMAIN="${PA_USERNAME}.pythonanywhere.com"
-REPO_DIR="/home/${PA_USERNAME}/dotfiles"
-PROJECT_DIR="${REPO_DIR}/gtd"
+PROJECT_DIR="/home/${PA_USERNAME}/gtd"
 VENV_DIR="${PROJECT_DIR}/.venv"
 WSGI_FILE="/var/www/${PA_USERNAME//./_}_pythonanywhere_com_wsgi.py"
 
 command -v uv &>/dev/null || curl -LsSf https://astral.sh/uv/install.sh | sh
 
-if [[ ! -d "${REPO_DIR}" ]]; then
-    git clone https://github.com/dannybrown37/dotfiles "${REPO_DIR}"
+if [[ ! -d "${PROJECT_DIR}" ]]; then
+    git clone https://github.com/dannybrown37/gtd "${PROJECT_DIR}"
 else
-    git -C "${REPO_DIR}" pull
+    git -C "${PROJECT_DIR}" pull
 fi
 
 cd "${PROJECT_DIR}"
