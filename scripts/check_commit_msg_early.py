@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Validate the commit message during the *pre-commit* stage, not commit-msg.
 
 Git runs hooks in the order pre-commit -> prepare-commit-msg -> editor ->
