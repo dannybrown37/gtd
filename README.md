@@ -1,6 +1,6 @@
 # The Getting Things Done Terminal User Interface
 
-A CLI for personal productivity built around [GTD (Getting Things Done)](https://gettingthingsdone.com/).
+A TUI/CLI/API for personal productivity built around [GTD (Getting Things Done)](https://gettingthingsdone.com/).
 
 ## What it does
 
