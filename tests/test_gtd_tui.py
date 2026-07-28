@@ -31,7 +31,12 @@ from gtd.gtd_tui import (
 )
 from gtd.notion.models import ProjectEntry
 from gtd.notion.schema import STATUS_ICONS
-from gtd.tui import SelectModal, VimListView, repopulate
+from gtd.tui import (
+    SelectModal,
+    VimListView,
+    remove_list_item,
+    repopulate,
+)
 
 
 def _entry(**kwargs) -> ProjectEntry:
@@ -295,6 +300,80 @@ class TestVimListViewRepopulate:
         highlighted, index = asyncio.run(run())
         assert index is None
         assert highlighted == [False, False]
+
+
+class TestRemoveListItem:
+    """Regression coverage for the removed-item highlight bug.
+
+    ListItem.remove() leaves ListView.index alone, so removing the
+    highlighted item leaves the index pointing at whatever slides into its
+    place without highlighting it. Most visible with one item left, where
+    j/k can't change index to re-fire the watcher.
+    """
+
+    def _remove_at(
+        self,
+        n: int,
+        remove_index: int,
+        highlight_index: int,
+        *,
+        separator_first: bool = False,
+    ) -> tuple[list[bool], int | None]:
+        async def run() -> tuple[list[bool], int | None]:
+            app = _ListHost()
+            async with app.run_test() as pilot:
+                lv = app.query_one('#lv', VimListView)
+                await repopulate(
+                    lv, _items(n, separator_first=separator_first)
+                )
+                await pilot.pause()
+                lv.index = highlight_index
+                await pilot.pause()
+                remove_list_item(lv, lv.children[remove_index])
+                await pilot.pause()
+                return (
+                    [i.highlighted for i in lv.query(ListItem)],
+                    lv.index,
+                )
+
+        return asyncio.run(run())
+
+    def test_survivor_highlighted_when_index_unchanged(self):
+        """Two items, first highlighted and removed — index stays 0."""
+        highlighted, index = self._remove_at(2, 0, 0)
+        assert index == 0
+        assert highlighted == [True]
+
+    def test_last_item_removed_falls_back_to_previous(self):
+        highlighted, index = self._remove_at(3, 2, 2)
+        assert index == 1
+        assert highlighted == [False, True]
+
+    def test_middle_item_removed_highlights_successor(self):
+        highlighted, index = self._remove_at(3, 1, 1)
+        assert index == 1
+        assert highlighted == [False, True]
+
+    def test_removing_above_highlight_shifts_index_down(self):
+        highlighted, index = self._remove_at(3, 0, 2)
+        assert index == 1
+        assert highlighted == [False, True]
+
+    def test_removing_below_highlight_leaves_index_alone(self):
+        highlighted, index = self._remove_at(3, 2, 0)
+        assert index == 0
+        assert highlighted == [True, False]
+
+    def test_skips_separator_when_falling_back(self):
+        """Sole entry under a separator: nothing left to highlight."""
+        highlighted, index = self._remove_at(1, 1, 1, separator_first=True)
+        assert index is None
+        assert highlighted == [False]
+
+    def test_removing_only_item_clears_index(self):
+        highlighted, index = self._remove_at(1, 0, 0)
+        assert index is None
+        assert highlighted == []
 
 
 class TestVimListViewJumps:

@@ -46,6 +46,7 @@ from gtd.tui import (
     SelectModal,
     TwoFieldModal,
     VimListView,
+    remove_list_item,
     repopulate,
 )
 
@@ -904,7 +905,7 @@ class BaseEntryContent(Vertical):
         lv = self.query_one('#entry-list', VimListView)
         for child in lv.query(EntryListItem):
             if child.page_id == page_id:
-                child.remove()
+                remove_list_item(lv, child)
                 break
         header = self.query_one('#entry-list-header', Static)
         detail = self.query_one('#entry-detail', Static)
@@ -1189,7 +1190,7 @@ class ProjectsBrowseScreen(ModalScreen):
         self._entries.pop(idx)
         child = lv.highlighted_child
         if child:
-            child.remove()
+            remove_list_item(lv, child)
         n = len(self._entries)
         s = 's' if n != 1 else ''
         self.query_one('.sb-title', Static).update(
@@ -1364,7 +1365,7 @@ class WaitingForBrowseScreen(ModalScreen):
         self._entries.pop(idx)
         child = lv.highlighted_child
         if child:
-            child.remove()
+            remove_list_item(lv, child)
         n = len(self._entries)
         s = 's' if n != 1 else ''
         self.query_one('.sb-title', Static).update(
@@ -1576,7 +1577,7 @@ class SomedayBrowseScreen(ModalScreen):
         self._entries.pop(idx)
         child = lv.highlighted_child
         if child:
-            child.remove()
+            remove_list_item(lv, child)
         header = self.query_one('.sb-title', Static)
         n = len(self._entries)
         s = 's' if n != 1 else ''
@@ -2077,12 +2078,10 @@ class TodayContent(BaseEntryContent):
 
         set_weekly_habit_date(item.habit_key)
         lv = self.query_one('#entry-list', VimListView)
-        idx = lv.index
-        item.remove()
+        remove_list_item(lv, item)
         self._habit_items = [
             h for h in self._habit_items if h.habit_key != item.habit_key
         ]
-        lv.index = max(0, (idx or 1) - 1)
         self._update_detail()
         self.app.refresh_bindings()
         self.app.notify(f'✓ {item.habit_label} done for this week')

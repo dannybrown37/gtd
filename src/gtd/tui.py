@@ -381,6 +381,53 @@ async def repopulate(lv: ListView, items: Iterable[ListItem]) -> None:
     )
 
 
+def _nearest_enabled(lv: ListView, start: int) -> int | None:
+    """Index of the first enabled item at or after `start`, else before it."""
+    nodes = list(lv.children)
+    if not nodes:
+        return None
+    for i in range(min(start, len(nodes) - 1), len(nodes)):
+        if not nodes[i].disabled:
+            return i
+    for i in range(min(start, len(nodes)) - 1, -1, -1):
+        if not nodes[i].disabled:
+            return i
+    return None
+
+
+def remove_list_item(lv: ListView, item: ListItem) -> None:
+    """Remove `item` from `lv`, keeping the highlight on a real item.
+
+    `ListItem.remove()` leaves `ListView.index` untouched, so removing the
+    highlighted item leaves the index pointing at whatever slides into its
+    place without ever giving that widget the `-highlight` class: the list
+    looks unhighlighted (only the focused ListView's background tint shows)
+    even though actions still operate on the item. Mirrors the index fixup
+    `ListView.pop` does, including its manual `watch_index` call for when
+    the index number is unchanged but the widget behind it isn't.
+    """
+
+    async def _remove() -> None:
+        # Resolved here, not at call time: back-to-back removals each queue
+        # their own callback, so positions taken earlier can be stale.
+        try:
+            index = list(lv.children).index(item)
+        except ValueError:
+            return
+        await item.remove()
+        if lv.index is None:
+            return
+        if index < lv.index:
+            lv.index -= 1
+        elif index == lv.index:
+            old_index = lv.index
+            lv.index = _nearest_enabled(lv, index)
+            if lv.index == old_index:
+                lv.watch_index(old_index, lv.index)
+
+    lv.call_next(_remove)
+
+
 class VimListView(ListView):
     """ListView with j/k/G/gg vim-style navigation.
 
