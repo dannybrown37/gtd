@@ -276,6 +276,7 @@ def inbox() -> Any:
 @app.post('/capture')
 @require_auth
 def capture() -> Any:
+    """Add an item to the inbox. Body: {"header": "..."}."""
     body = request.get_json(force=True)
     header = (body.get('header') or '').strip()
     if not header:
@@ -335,6 +336,7 @@ def contexts() -> Any:
 @app.get('/next-steps')
 @require_auth
 def next_steps() -> Any:
+    """Get actionable next steps, optionally filtered by context."""
     today_str = _get_timezone_iso_date()
     pages = query_database(
         filter_obj={

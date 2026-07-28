@@ -44,7 +44,7 @@ repos:
         name: Sync README menu
         entry: bash -c 'uv run python scripts/update_readme.py && git add README.md'
         language: system
-        files: ^(src/gtd/cli\.py|README\.md)$
+        files: ^(src/gtd/cli\.py|src/gtd/api\.py|README\.md)$
         pass_filenames: false
 
       - id: tests

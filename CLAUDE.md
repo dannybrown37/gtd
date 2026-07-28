@@ -140,21 +140,22 @@ Two-mode design: opens in **browse mode** (ListView focused, j/k navigate). **Ta
 
 ## HTTP API (api.py)
 
-A Flask app for mobile/iOS Shortcuts access. Requires the `api` optional dependency group.
+A Flask app giving mobile/iOS Shortcuts access to GTD without a terminal —
+capture, check today's items, triage the inbox, etc. There is no central
+server: each user runs their own instance against their own Notion
+integration/database, so no GTD data is ever shared with or stored by a
+third party.
 
 **Install**: `uv pip install "gtd[api]"`  
 **Run**: `gtd api` (default: `0.0.0.0:8000`) or `gtd api --port 9000`  
 **Auth**: Bearer token — set `GTD_API_KEY` env var on the server; pass as `Authorization: Bearer <key>` header.
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/capture` | Add item to inbox (`{"header": "..."}`) |
-| `GET` | `/today` | Today's actionable entries |
-| `GET` | `/inbox` | All Triage entries |
-| `POST` | `/done/{page_id}` | Archive (complete) an entry |
-| `POST` | `/snooze/{page_id}` | Snooze (`{"days": 1}` or `{"until": "Friday"}`) |
-| `PATCH` | `/entry/{page_id}` | Update fields: `status`, `context`, `next_step`, `due_date`, `follow_up_date` |
-| `GET` | `/statuses` | List valid GTD statuses |
+The endpoint list is intentionally not duplicated here — it drifts. The
+README's "HTTP API" section has an always-current table auto-generated from
+`api.py`'s route decorators by `scripts/update_readme.py` (run via the
+`sync-readme` pre-commit hook whenever `api.py` changes). To document a new
+endpoint, give its Flask view function a one-line docstring — that's what
+lands in the table.
 
 All responses are JSON. Entry objects match `ProjectEntry` fields.
 

@@ -71,13 +71,48 @@ gtd update           # Update project fields
 gtd defer            # Defer a project
 ```
 
+## HTTP API
+
+A small Flask app (`gtd api`) exposes GTD operations over HTTP, primarily so
+you can drive `gtd` from **iOS Shortcuts** (or any other HTTP client) without
+opening a terminal — capture a thought, check today's actionable items, or
+triage the inbox from your phone.
+
+There's no central server in the loop: you run this yourself, against your own
+Notion integration and database. Your GTD data lives in your Notion account under
+your own token.
+
+
+**Install**: `uv pip install "gtd[api]"`
+**Run**: `gtd api` (default `0.0.0.0:8000`) or `gtd api --port 9000`
+**Auth**: Bearer token — set `GTD_API_KEY` on the server, then pass
+`Authorization: Bearer <key>` on every request.
+
+<!-- BEGIN API MENU -->
+| Method | Path | Description |
+| --- | --- | --- |
+| `POST` | `/capture` | Add an item to the inbox. Body: {"header": "..."}. |
+| `GET` | `/contexts` | Get active contexts. |
+| `GET` | `/inbox` | Get all Triage entries (inbox). |
+| `GET` | `/list-categories` | Return canonical list categories from Notion (for debugging/UI use). |
+| `GET` | `/list/<category>` | Get all entries in a specific list category. |
+| `GET` | `/next-steps` | Get actionable next steps, optionally filtered by context. |
+| `GET` | `/triage-schema` | Get schema for triage workflow: statuses and contexts per status. |
+| `POST` | `/triage/<page_id>` | Atomically triage an entry with full data. |
+<!-- END API MENU -->
+
 ## Updating this README
 
-Menu options are extracted from source. After changing menu items in `gtd.py`:
+The menu table and the HTTP API table above are both extracted from source
+(`cli.py`'s `menu_items` and the `@app.get`/`@app.post`/... routes in
+`api.py`, respectively). After changing either, regenerate both:
 
 ```bash
 python scripts/update_readme.py
 ```
+
+A pre-commit hook (`sync-readme`) runs this automatically whenever `cli.py`,
+`api.py`, or `README.md` changes, so the tables shouldn't drift in practice.
 
 ## Data storage
 
