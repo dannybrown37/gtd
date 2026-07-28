@@ -6,6 +6,7 @@ import httpx
 import pytest
 from textual.app import App, ComposeResult
 from textual.binding import Binding
+from textual.screen import ModalScreen
 from textual.widgets import (
     Label,
     ListItem,
@@ -23,8 +24,11 @@ from gtd.gtd_tui import (
     GTDApp,
     ListsContent,
     NextStepsContent,
+    ProjectsBrowseScreen,
     SeparatorListItem,
+    SomedayBrowseScreen,
     TodayContent,
+    WaitingForBrowseScreen,
     _classify_network_error,
     _open_steps_editor,
     _render_entry_detail,
@@ -737,3 +741,196 @@ class TestTodayHabitRow:
         assert count == 1  # the row stays on the list
         assert row.startswith('[green]●[/green] Weekly Review')
         assert 'last: today' in row
+
+
+_BROWSE_SCREENS = [
+    ProjectsBrowseScreen,
+    WaitingForBrowseScreen,
+    SomedayBrowseScreen,
+]
+
+
+@pytest.mark.parametrize(
+    'screen_cls', _BROWSE_SCREENS, ids=lambda c: c.__name__
+)
+class TestReviewStepScoping:
+    """Weekly Review sub-screens must not label two keys the same thing.
+
+    `esc` finishes the review step; `d` acts on the highlighted item. Both
+    were described as "Done", which made it impossible to tell which key
+    completed the step and which completed the ticket.
+    """
+
+    def test_no_two_visible_bindings_share_a_description(self, screen_cls):
+        shown = [b.description.lower() for b in screen_cls.BINDINGS if b.show]
+        assert len(shown) == len(set(shown))
+
+    def test_escape_is_scoped_to_the_step(self, screen_cls):
+        esc = next(b for b in screen_cls.BINDINGS if b.key == 'escape')
+        assert esc.action == 'finish_step'
+        assert 'step' in esc.description.lower()
+        assert hasattr(screen_cls, 'action_finish_step')
+
+    def test_item_keys_never_say_bare_done(self, screen_cls):
+        item_keys = [
+            b for b in screen_cls.BINDINGS if b.show and b.key != 'escape'
+        ]
+        assert item_keys
+        assert all(b.description.lower() != 'done' for b in item_keys)
+
+    def test_footer_names_both_scopes(self, screen_cls):
+        entries = [_entry(page_id='a', header='Alpha')]
+
+        async def run() -> list[str]:
+            app = _TabHost(Static(''))
+            async with app.run_test(size=(100, 24)) as pilot:
+                app.push_screen(screen_cls(entries))
+                for _ in range(3):
+                    await pilot.pause()
+                return [
+                    str(s.content)
+                    for s in app.screen.query('.sb-footer').results(Static)
+                ]
+
+        footers = asyncio.run(run())
+        assert any('this item' in f for f in footers)
+        assert any('this step' in f for f in footers)
+
+
+class _BrowseHost(App):
+    def compose(self) -> ComposeResult:
+        yield Static('')
+
+
+async def _push(app, screen, pilot, pauses: int = 3) -> ModalScreen:
+    app.push_screen(screen)
+    for _ in range(pauses):
+        await pilot.pause()
+    return screen
+
+
+@pytest.mark.parametrize(
+    'screen_cls', _BROWSE_SCREENS, ids=lambda c: c.__name__
+)
+class TestBrowseScreenHighlight:
+    """Rows are populated after mount, so nothing was ever highlighted.
+
+    ListView only picks an initial index during its own mount. Appending
+    afterwards left index None, so `_current_entry()` returned None and every
+    item action was a silent no-op until j/k was pressed.
+    """
+
+    def _first_row_state(self, screen_cls) -> tuple[int | None, bool]:
+        entries = [
+            _entry(page_id='a', header='Alpha'),
+            _entry(page_id='b', header='Bravo'),
+        ]
+
+        async def run() -> tuple[int | None, bool]:
+            app = _BrowseHost()
+            async with app.run_test(size=(100, 24)) as pilot:
+                screen = await _push(app, screen_cls(entries), pilot)
+                lv = screen.query_one('#sb-list', VimListView)
+                return lv.index, screen._current_entry() is not None  # noqa: SLF001
+
+        return asyncio.run(run())
+
+    def test_first_row_is_highlighted_on_open(self, screen_cls):
+        index, _ = self._first_row_state(screen_cls)
+        assert index == 0
+
+    def test_item_actions_have_a_target_immediately(self, screen_cls):
+        _, has_entry = self._first_row_state(screen_cls)
+        assert has_entry
+
+
+_UPDATE_SCREENS = [ProjectsBrowseScreen, WaitingForBrowseScreen]
+
+
+class TestBrowseUpdateAction:
+    """`u: update project` replaced `d: complete project`.
+
+    Nothing on the review screens should archive a page any more.
+    """
+
+    @pytest.mark.parametrize(
+        'screen_cls', _UPDATE_SCREENS, ids=lambda c: c.__name__
+    )
+    def test_offers_update_not_complete(self, screen_cls):
+        actions = {b.action for b in screen_cls.BINDINGS}
+        assert 'update_entry' in actions
+        assert 'mark_done' not in actions
+        assert 'heard_back' not in actions
+        descriptions = ' '.join(
+            b.description.lower() for b in screen_cls.BINDINGS if b.show
+        )
+        assert 'complete' not in descriptions
+
+    @pytest.mark.parametrize(
+        'screen_cls', _UPDATE_SCREENS, ids=lambda c: c.__name__
+    )
+    def test_update_writes_and_refreshes_the_row(self, screen_cls):
+        entries = [
+            _entry(page_id='a', header='Alpha'),
+            _entry(page_id='b', header='Bravo'),
+        ]
+        writes: list[tuple[str, dict]] = []
+
+        async def run() -> tuple[list[str], str]:
+            app = _BrowseHost()
+            with (
+                patch(
+                    'gtd.notion.client.update_page',
+                    side_effect=lambda pid, props: writes.append((pid, props)),
+                ),
+                patch(
+                    'gtd.notion.client.build_property_update',
+                    side_effect=lambda **kw: kw,
+                ),
+            ):
+                async with app.run_test(size=(100, 24)) as pilot:
+                    screen = await _push(app, screen_cls(entries), pilot)
+                    screen.action_update_entry()
+                    for _ in range(4):
+                        await pilot.pause()
+                    await pilot.press('enter')  # 'Name' — the first field
+                    for _ in range(4):
+                        await pilot.pause()
+                    for _ in range(len('Alpha')):
+                        await pilot.press('backspace')
+                    for ch in 'Zulu':
+                        await pilot.press(ch)
+                    await pilot.press('enter')
+                    for _ in range(6):
+                        await pilot.pause()
+                    lv = screen.query_one('#sb-list', VimListView)
+                    rows = [
+                        str(i.query_one(Label).content)
+                        for i in lv.query(ListItem)
+                    ]
+                    return rows, screen._entries[0].header  # noqa: SLF001
+
+        rows, header = asyncio.run(run())
+        assert writes == [('a', {'name': 'Zulu'})]
+        assert header == 'Zulu'  # local entry mirrors the write
+        assert 'Zulu' in rows[0]  # and so does the row label
+        assert 'Bravo' in rows[1]
+
+    def test_waiting_for_change_status_opens(self):
+        """SelectModal was called with a duplicated `title` kwarg."""
+        entries = [_entry(page_id='a', header='Alpha', status='Waiting For')]
+
+        async def run() -> tuple[str, object]:
+            app = _BrowseHost()
+            async with app.run_test(size=(100, 24)) as pilot:
+                screen = await _push(
+                    app, WaitingForBrowseScreen(entries), pilot
+                )
+                worker = screen.action_change_status()
+                for _ in range(5):
+                    await pilot.pause()
+                return type(app.screen).__name__, worker.error
+
+        screen_name, error = asyncio.run(run())
+        assert error is None
+        assert screen_name == 'SelectModal'

@@ -368,12 +368,20 @@ class EntryListItem(ListItem):
     def __init__(self, entry: ProjectEntry) -> None:
         super().__init__()
         self.page_id = entry.page_id
+        self._text = self._format(entry)
+
+    @staticmethod
+    def _format(entry: ProjectEntry) -> str:
         icon = STATUS_ICONS.get(entry.status, '·')
-        ctx = ''
-        self._text = f'{icon} {entry.header.strip()}{ctx}'
+        return f'{icon} {entry.header.strip()}'
 
     def compose(self) -> ComposeResult:
-        yield Label(self._text)
+        yield Label(self._text, markup=True)
+
+    def refresh_label(self, entry: ProjectEntry) -> None:
+        """Re-render after the entry changed underneath us."""
+        self._text = self._format(entry)
+        self.query_one(Label).update(self._text)
 
 
 class ListEntryListItem(ListItem):
@@ -434,8 +442,8 @@ class SeparatorListItem(ListItem):
 class NextStepListItem(EntryListItem):
     """List item showing next step as primary, project name as secondary."""
 
-    def __init__(self, entry: ProjectEntry) -> None:
-        super().__init__(entry)
+    @staticmethod
+    def _format(entry: ProjectEntry) -> str:
         step = entry.current_step
         project = entry.header.strip()
         due = ''
@@ -444,12 +452,8 @@ class NextStepListItem(EntryListItem):
                 d = datetime.fromisoformat(entry.due_date)
                 due = f'  [yellow]{d:%b %-d}[/yellow]'
         if step:
-            self._text = f'[cyan]→[/cyan] {step}\n  [dim]{project}{due}[/dim]'
-        else:
-            self._text = f'[dim](no step)[/dim]\n  [dim]{project}{due}[/dim]'
-
-    def compose(self) -> ComposeResult:
-        yield Label(self._text, markup=True)
+            return f'[cyan]→[/cyan] {step}\n  [dim]{project}{due}[/dim]'
+        return f'[dim](no step)[/dim]\n  [dim]{project}{due}[/dim]'
 
 
 def _context_grouped_items(
@@ -544,8 +548,13 @@ async def _shared_update_entry(
     app: App,
     entry: ProjectEntry,
     refresh_cb: Callable[[], None],
-) -> None:
-    """Update entry fields — shared across tab widgets."""
+) -> dict | None:
+    """Update entry fields — shared across tab widgets.
+
+    Returns the props that were written (see `_prompt_and_get_props`), so
+    callers holding a local `ProjectEntry` can apply the same change without
+    re-fetching. None when the user backed out.
+    """
     from gtd.notion.client import build_property_update, update_page
 
     fields = [
@@ -561,11 +570,11 @@ async def _shared_update_entry(
         SelectModal('Update which field?', fields)
     )
     if not choice:
-        return
+        return None
 
     props = await _prompt_and_get_props(app, entry, choice)
     if props is None:
-        return
+        return None
 
     loop = asyncio.get_running_loop()
     await loop.run_in_executor(
@@ -573,6 +582,48 @@ async def _shared_update_entry(
     )
     refresh_cb()
     app.notify(f'✓ "{entry.header.strip()}" updated')
+    return props
+
+
+# `_prompt_and_get_props` keys → ProjectEntry attributes.
+_PROP_TO_FIELD = {
+    'name': 'header',
+    'status': 'status',
+    'context': 'context',
+    'next_step': 'next_step',
+    'success_condition': 'success_condition',
+    'follow_up_date': 'follow_up_date',
+    'due_date': 'due_date',
+}
+
+
+def _apply_props(entry: ProjectEntry, props: dict) -> None:
+    """Mirror a Notion write onto the local entry."""
+    for key, value in props.items():
+        field = _PROP_TO_FIELD.get(key)
+        if field:
+            setattr(entry, field, value)
+
+
+async def _browse_update_entry(screen: ModalScreen, list_id: str) -> None:
+    """Update the highlighted entry from a Weekly Review browse screen.
+
+    Writes straight to Notion (the review screens' other actions queue their
+    changes for dismissal, but an update has no deferred counterpart), then
+    keeps the row and the local entry in step with what was written so the
+    item can be updated again without leaving the review.
+    """
+    entry = screen._current_entry()  # noqa: SLF001
+    if not entry:
+        return
+    props = await _shared_update_entry(screen.app, entry, lambda: None)
+    if not props:
+        return
+    _apply_props(entry, props)
+    lv = screen.query_one(list_id, VimListView)
+    child = lv.highlighted_child
+    if isinstance(child, EntryListItem):
+        child.refresh_label(entry)
 
 
 async def _open_steps_editor(app: App, initial_text: str = '') -> str:
@@ -1150,11 +1201,12 @@ class ProjectsBrowseScreen(ModalScreen):
     }
     ProjectsBrowseScreen VimListView { height: auto; max-height: 24; }
     ProjectsBrowseScreen .sb-footer { margin-top: 1; color: $text-muted; }
+    ProjectsBrowseScreen .sb-footer-exit { margin-top: 0; }
     """
 
     BINDINGS: ClassVar[list[Binding]] = [
-        Binding('escape', 'done', 'Done', show=True),
-        Binding('d', 'mark_done', 'Done', show=True),
+        Binding('escape', 'finish_step', 'Finish step', show=True),
+        Binding('u', 'update_entry', 'Update project', show=True),
         Binding('s', 'someday', 'Someday', show=True),
         Binding('e', 'edit_steps', 'Edit Steps', show=True),
         Binding('j', 'cursor_down', show=False),
@@ -1164,7 +1216,6 @@ class ProjectsBrowseScreen(ModalScreen):
     def __init__(self, entries: list[ProjectEntry]) -> None:
         super().__init__()
         self._entries = list(entries)
-        self._to_done: list[ProjectEntry] = []
         self._to_someday: list[ProjectEntry] = []
         self._step_updates: dict[str, str] = {}
 
@@ -1178,16 +1229,27 @@ class ProjectsBrowseScreen(ModalScreen):
                 markup=True,
             )
             yield VimListView(id='sb-list')
+            # Item actions and the step exit are labelled by what they act
+            # on — both used to just say "done".
             yield Static(
-                '[dim]j/k · d: done · s: someday · e: steps · esc: done[/dim]',
+                '[dim]this item —[/dim] u: update project  ·  '
+                's: → someday  ·  e: edit steps',
                 classes='sb-footer',
                 markup=True,
             )
+            yield Static(
+                '[dim]this step —[/dim] esc: done reviewing projects'
+                '  [dim]· j/k: browse[/dim]',
+                classes='sb-footer sb-footer-exit',
+                markup=True,
+            )
 
-    def on_mount(self) -> None:
+    async def on_mount(self) -> None:
         lv = self.query_one('#sb-list', VimListView)
-        for entry in self._entries:
-            lv.append(EntryListItem(entry))
+        # repopulate, not append: ListView only picks an initial index at its
+        # own mount, so appending afterwards leaves nothing highlighted and
+        # every item action a silent no-op until j/k is pressed.
+        await repopulate(lv, [EntryListItem(e) for e in self._entries])
         lv.focus()
 
     def _current_entry(self) -> ProjectEntry | None:
@@ -1212,19 +1274,11 @@ class ProjectsBrowseScreen(ModalScreen):
             f'Current Projects  [dim]({n} item{s})[/dim]'
         )
         if not self._entries:
-            self.dismiss((self._to_done, self._to_someday, self._step_updates))
+            self.dismiss((self._to_someday, self._step_updates))
 
     @work
-    async def action_mark_done(self) -> None:
-        entry = self._current_entry()
-        if not entry:
-            return
-        confirmed = await self.app.push_screen_wait(
-            ConfirmModal(f'Mark done: "{entry.header.strip()}"?')
-        )
-        if confirmed:
-            self._to_done.append(entry)
-            self._remove_current()
+    async def action_update_entry(self) -> None:
+        await _browse_update_entry(self, '#sb-list')
 
     @work
     async def action_someday(self) -> None:
@@ -1250,8 +1304,8 @@ class ProjectsBrowseScreen(ModalScreen):
             self._step_updates[entry.page_id] = val
             self.app.notify(f'Steps updated: {entry.header.strip()[:40]}')
 
-    def action_done(self) -> None:
-        self.dismiss((self._to_done, self._to_someday, self._step_updates))
+    def action_finish_step(self) -> None:
+        self.dismiss((self._to_someday, self._step_updates))
 
     def action_cursor_down(self) -> None:
         self.query_one('#sb-list', VimListView).action_cursor_down()
@@ -1263,7 +1317,6 @@ class ProjectsBrowseScreen(ModalScreen):
 async def _review_projects(app: App) -> int:
     """Browse Current Projects. Returns count."""
     from gtd.notion.client import (
-        archive_page,
         build_property_update,
         query_database,
         update_page,
@@ -1288,9 +1341,7 @@ async def _review_projects(app: App) -> int:
     if not result:
         return len(entries)
 
-    to_done, to_someday, step_updates = result
-    for entry in to_done:
-        await loop.run_in_executor(None, archive_page, entry.page_id)
+    to_someday, step_updates = result
     for entry in to_someday:
         await loop.run_in_executor(
             None,
@@ -1327,11 +1378,12 @@ class WaitingForBrowseScreen(ModalScreen):
     }
     WaitingForBrowseScreen VimListView { height: auto; max-height: 24; }
     WaitingForBrowseScreen .sb-footer { margin-top: 1; color: $text-muted; }
+    WaitingForBrowseScreen .sb-footer-exit { margin-top: 0; }
     """
 
     BINDINGS: ClassVar[list[Binding]] = [
-        Binding('escape', 'done', 'Done', show=True),
-        Binding('d', 'heard_back', 'Project Done', show=True),
+        Binding('escape', 'finish_step', 'Finish step', show=True),
+        Binding('u', 'update_entry', 'Update project', show=True),
         Binding('s', 'change_status', 'Change Status', show=True),
         Binding('j', 'cursor_down', show=False),
         Binding('k', 'cursor_up', show=False),
@@ -1340,7 +1392,6 @@ class WaitingForBrowseScreen(ModalScreen):
     def __init__(self, entries: list[ProjectEntry]) -> None:
         super().__init__()
         self._entries = list(entries)
-        self._to_done: list[ProjectEntry] = []
         self._status_changes: dict[str, str] = {}
 
     def compose(self) -> ComposeResult:
@@ -1354,15 +1405,24 @@ class WaitingForBrowseScreen(ModalScreen):
             )
             yield VimListView(id='sb-list')
             yield Static(
-                '[dim]j/k · d: project done · s: change status[/dim]',
+                '[dim]this item —[/dim] u: update project  ·  '
+                's: change status',
                 classes='sb-footer',
                 markup=True,
             )
+            yield Static(
+                '[dim]this step —[/dim] esc: done reviewing waiting for'
+                '  [dim]· j/k: browse[/dim]',
+                classes='sb-footer sb-footer-exit',
+                markup=True,
+            )
 
-    def on_mount(self) -> None:
+    async def on_mount(self) -> None:
         lv = self.query_one('#sb-list', VimListView)
-        for entry in self._entries:
-            lv.append(EntryListItem(entry))
+        # repopulate, not append: ListView only picks an initial index at its
+        # own mount, so appending afterwards leaves nothing highlighted and
+        # every item action a silent no-op until j/k is pressed.
+        await repopulate(lv, [EntryListItem(e) for e in self._entries])
         lv.focus()
 
     def _current_entry(self) -> ProjectEntry | None:
@@ -1387,19 +1447,11 @@ class WaitingForBrowseScreen(ModalScreen):
             f'Waiting For  [dim]({n} item{s})[/dim]'
         )
         if not self._entries:
-            self.dismiss((self._to_done, self._status_changes))
+            self.dismiss(self._status_changes)
 
     @work
-    async def action_heard_back(self) -> None:
-        entry = self._current_entry()
-        if not entry:
-            return
-        confirmed = await self.app.push_screen_wait(
-            ConfirmModal(f'Mark "{entry.header.strip()}" as done?')
-        )
-        if confirmed:
-            self._to_done.append(entry)
-            self._remove_current()
+    async def action_update_entry(self) -> None:
+        await _browse_update_entry(self, '#sb-list')
 
     @work
     async def action_change_status(self) -> None:
@@ -1408,11 +1460,7 @@ class WaitingForBrowseScreen(ModalScreen):
             return
         options = [s for s in STATUSES if s != 'Waiting For']
         new_status = await self.app.push_screen_wait(
-            SelectModal(
-                options,
-                title='Move to status',
-                subtitle=entry.header.strip(),
-            )
+            SelectModal(f'Move to status: {entry.header.strip()}', options)
         )
         if new_status:
             self._status_changes[entry.page_id] = new_status
@@ -1426,8 +1474,8 @@ class WaitingForBrowseScreen(ModalScreen):
     async def action_follow_up(self) -> None:
         pass  # replaced by action_change_status
 
-    def action_done(self) -> None:
-        self.dismiss((self._to_done, self._status_changes))
+    def action_finish_step(self) -> None:
+        self.dismiss(self._status_changes)
 
     def action_cursor_down(self) -> None:
         self.query_one('#sb-list', VimListView).action_cursor_down()
@@ -1439,7 +1487,6 @@ class WaitingForBrowseScreen(ModalScreen):
 async def _review_waiting_for(app: App) -> int:
     """Browse Waiting For items. Returns count."""
     from gtd.notion.client import (
-        archive_page,
         build_property_update,
         query_database,
         update_page,
@@ -1464,9 +1511,7 @@ async def _review_waiting_for(app: App) -> int:
     if not result:
         return len(entries)
 
-    to_done, status_changes = result
-    for entry in to_done:
-        await loop.run_in_executor(None, archive_page, entry.page_id)
+    status_changes = result
     for page_id, new_status in status_changes.items():
         await loop.run_in_executor(
             None,
@@ -1539,12 +1584,13 @@ class SomedayBrowseScreen(ModalScreen):
         margin-top: 1;
         color: $text-muted;
     }
+    SomedayBrowseScreen .sb-footer-exit { margin-top: 0; }
     """
 
     BINDINGS: ClassVar[list[Binding]] = [
-        Binding('escape', 'done', 'Done', show=True),
+        Binding('escape', 'finish_step', 'Finish step', show=True),
         Binding('a', 'activate', 'Activate', show=True),
-        Binding('d', 'drop', 'Drop', show=True),
+        Binding('d', 'drop', 'Drop item', show=True),
         Binding('j', 'cursor_down', show=False),
         Binding('k', 'cursor_up', show=False),
     ]
@@ -1566,15 +1612,23 @@ class SomedayBrowseScreen(ModalScreen):
             )
             yield VimListView(id='sb-list')
             yield Static(
-                '[dim]j/k: browse · a: activate · d: drop · esc: done[/dim]',
+                '[dim]this item —[/dim] a: activate  ·  d: drop',
                 classes='sb-footer',
                 markup=True,
             )
+            yield Static(
+                '[dim]this step —[/dim] esc: done reviewing someday/maybe'
+                '  [dim]· j/k: browse[/dim]',
+                classes='sb-footer sb-footer-exit',
+                markup=True,
+            )
 
-    def on_mount(self) -> None:
+    async def on_mount(self) -> None:
         lv = self.query_one('#sb-list', VimListView)
-        for entry in self._entries:
-            lv.append(EntryListItem(entry))
+        # repopulate, not append: ListView only picks an initial index at its
+        # own mount, so appending afterwards leaves nothing highlighted and
+        # every item action a silent no-op until j/k is pressed.
+        await repopulate(lv, [EntryListItem(e) for e in self._entries])
         lv.focus()
 
     def _current_entry(self) -> ProjectEntry | None:
@@ -1625,7 +1679,7 @@ class SomedayBrowseScreen(ModalScreen):
             self._to_drop.append(entry)
             self._remove_current()
 
-    def action_done(self) -> None:
+    def action_finish_step(self) -> None:
         self.dismiss((self._to_activate, self._to_drop))
 
     def action_cursor_down(self) -> None:
@@ -1710,7 +1764,7 @@ class WeeklyReviewScreen(ModalScreen[bool]):
     """
 
     BINDINGS: ClassVar[list[Binding]] = [
-        Binding('escape', 'cancel', 'Cancel'),
+        Binding('escape', 'cancel', 'Close review'),
         Binding('enter,space', 'toggle', 'Check/Launch', show=True),
         Binding('X', 'reset', 'Reset', show=True),
         Binding('j', 'cursor_down', show=False),
@@ -1774,7 +1828,8 @@ class WeeklyReviewScreen(ModalScreen[bool]):
                     classes='review-item',
                 )
             yield Static(
-                '[dim]j/k · space: launch · X: reset · esc: cancel[/dim]',
+                '[dim]j/k · space: launch step · X: reset · '
+                'esc: close (progress saved)[/dim]',
                 classes='review-footer',
             )
 

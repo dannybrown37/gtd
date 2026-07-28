@@ -64,9 +64,11 @@ The Today header count and its "nothing actionable 🎉" empty state describe th
 ### Waiting For tab (Weekly Review)
 
 `WaitingForBrowseScreen` — browse Waiting For items during the Weekly Review step. Actions:
-- **`d`** → Project Done — confirms then archives the page
+- **`d`** → Complete project — confirms then archives the page
 - **`s`** → Change Status — `SelectModal` with all statuses except "Waiting For"; updates Notion on dismiss
-- **`esc`** → Done / exit
+- **`esc`** → `action_finish_step` — finishes the review step
+
+**Key-scope labelling (all three browse screens)** — `ProjectsBrowseScreen`, `WaitingForBrowseScreen` and `SomedayBrowseScreen` each have keys at two different scopes, and both used to be described as "Done", which made them indistinguishable. The escape action is named `finish_step` (never `done`), and each screen's footer is two lines: `this item — ...` for the per-entry keys, `this step — esc: done reviewing <thing>` for the exit. Keep new bindings on the right line, and don't reuse a description across two visible bindings — `TestReviewStepScoping` enforces this.
 
 Changes are collected (`_to_done: list`, `_status_changes: dict[str, str]`) and applied in `_review_waiting_for` after dismissal.
 
