@@ -76,4 +76,7 @@ name = "cz_conventional_commits"
 version_provider = "pep621"
 tag_format = "v$version"
 major_version_zero = true
-update_changelog_on_bump = true
+# BOOTSTRAP ONLY: true crashes `cz bump` with NoRevisionError when the repo
+# has zero tags (incremental changelog has nothing to diff against). Flip
+# back to true in a follow-up commit once v0.1.0 exists.
+update_changelog_on_bump = false

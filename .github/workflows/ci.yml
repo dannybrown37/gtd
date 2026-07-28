@@ -49,24 +49,28 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Create bump commit and tag
+      - name: Install uv
+        uses: astral-sh/setup-uv@v9.0.0
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Bump version and tag
         id: cz
-        uses: commitizen-tools/commitizen-action@0.24.0
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          # actions/checkout leaves HEAD detached even on push events, so the
-          # action's own `git branch --show-current` fallback resolves to "" —
-          # pass the branch explicitly or the push step silently no-ops.
-          branch: ${{ github.ref_name }}
-          # no_raise defaults to "21" (NO_COMMITS_TO_BUMP) — pushes with no
-          # feat/fix-type commits since the last tag are a no-op, not a failure.
-          # debug surfaces the real traceback if this still fails silently —
-          # drop once the pipeline is verified working end-to-end.
-          debug: true
-          # BOOTSTRAP ONLY: `cz bump --changelog` hardcodes an incremental
-          # changelog diff against the previous tag, which crashes with
-          # NoRevisionError when the repo has zero tags. Re-enable
-          # `changelog: true` (or remove this line, true is the default) in a
-          # follow-up commit once v0.1.0 exists — every bump after the first
-          # will have a prior tag to diff against.
-          changelog: false
+        run: |
+          PRE_SHA="$(git rev-parse HEAD)"
+          uv run cz --no-raise 21 bump --yes
+          POST_SHA="$(git rev-parse HEAD)"
+          if [[ "$PRE_SHA" != "$POST_SHA" ]]; then
+            echo "bumped=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "bumped=false" >>"$GITHUB_OUTPUT"
+          fi
+
+      - name: Push bump commit and tag
+        if: steps.cz.outputs.bumped == 'true'
+        # cz bump creates a lightweight tag, so --follow-tags (annotated-only)
+        # wouldn't push it — push tags explicitly instead.
+        run: git push origin "HEAD:${{ github.ref_name }}" --tags
