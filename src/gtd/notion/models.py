@@ -51,6 +51,7 @@ class ProjectEntry:
     created_date: str
     list_category: str = ''
     updated_date: str = ''
+    area: str = ''
 
     @classmethod
     def from_page(cls: type[ProjectEntry], page: dict) -> ProjectEntry:
@@ -71,6 +72,7 @@ class ProjectEntry:
             created_date=page.get('created_time', ''),
             list_category=_get_select(props.get('List Category', {})),
             updated_date=page.get('last_edited_time', ''),
+            area=_get_select(props.get('Area', {})),
         )
 
     @property

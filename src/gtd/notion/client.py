@@ -241,6 +241,72 @@ def rename_list_category(old_name: str, new_name: str) -> None:
     _handle_response(response)
 
 
+def get_areas() -> list[str]:
+    """Get available areas of focus."""
+    return get_select_options('Area')
+
+
+def _area_options(schema: dict) -> list[dict]:
+    """Existing Area options — tolerates the property not existing yet.
+
+    Older databases predate the `Area` property; the first `add_area` call
+    creates it (PATCHing a properties dict Notion doesn't yet have adds it),
+    so callers shouldn't need `gtd init --upgrade` just to use Areas.
+    """
+    return (
+        schema['properties']
+        .get('Area', {})
+        .get('select', {})
+        .get('options', [])
+    )
+
+
+def add_area(name: str) -> None:
+    """Add a new area of focus to the Notion schema."""
+    schema = get_database_schema()
+    existing = {o['name'] for o in _area_options(schema)}
+    if name in existing:
+        return
+
+    db_id = get_projects_db_id()
+    new_opts = [*_area_options(schema), {'name': name}]
+    url = f'{NOTION_API_URL}/databases/{db_id}'
+    payload = {'properties': {'Area': {'select': {'options': new_opts}}}}
+    response = _patch(url, json=payload)
+    _handle_response(response)
+
+
+def remove_area(name: str) -> None:
+    """Remove an area of focus from the Notion schema."""
+    schema = get_database_schema()
+    opts = _area_options(schema)
+    new_opts = [o for o in opts if o['name'] != name]
+
+    if len(new_opts) == len(opts):
+        return  # Area doesn't exist
+
+    db_id = get_projects_db_id()
+    url = f'{NOTION_API_URL}/databases/{db_id}'
+    payload = {'properties': {'Area': {'select': {'options': new_opts}}}}
+    response = _patch(url, json=payload)
+    _handle_response(response)
+
+
+def rename_area(old_name: str, new_name: str) -> None:
+    """Rename an area of focus in the Notion schema."""
+    schema = get_database_schema()
+    opts = _area_options(schema)
+    new_opts = [
+        {'name': new_name} if o['name'] == old_name else o for o in opts
+    ]
+
+    db_id = get_projects_db_id()
+    url = f'{NOTION_API_URL}/databases/{db_id}'
+    payload = {'properties': {'Area': {'select': {'options': new_opts}}}}
+    response = _patch(url, json=payload)
+    _handle_response(response)
+
+
 def get_contexts() -> list[str]:
     """Get available contexts."""
     return get_select_options('Context')
@@ -443,6 +509,7 @@ def build_property_update(  # noqa: C901, PLR0912
     status: str | None = None,
     context: str | None = None,
     list_category: str | None = None,
+    area: str | None = None,
     next_step: str | None = None,
     success_condition: str | None = None,
     due_date: str | None = None,
@@ -464,6 +531,11 @@ def build_property_update(  # noqa: C901, PLR0912
             props['List Category'] = {'select': None}
         else:
             props['List Category'] = {'select': {'name': list_category}}
+    if area is not None:
+        if area == '':
+            props['Area'] = {'select': None}
+        else:
+            props['Area'] = {'select': {'name': area}}
     if next_step is not None:
         props['Next Actionable Step'] = {
             'rich_text': [{'text': {'content': next_step}}],

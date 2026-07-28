@@ -10,14 +10,18 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from gtd.notion.client import (
+    add_area,
     add_context,
     add_list_category,
+    get_areas,
     get_contexts,
     get_list_categories,
     get_select_options,
     query_database,
+    remove_area,
     remove_context,
     remove_list_category,
+    rename_area,
     rename_context,
     rename_list_category,
 )
@@ -160,6 +164,7 @@ class TestGetSelectOptions:
         [
             (get_list_categories, 'List Category'),
             (get_contexts, 'Context'),
+            (get_areas, 'Area'),
         ],
     )
     def test_wrappers_read_the_right_property(self, func, prop_name: str):
@@ -176,11 +181,36 @@ class TestGetSelectOptions:
 ADD_CASES = [
     (add_list_category, 'List Category'),
     (add_context, 'Context'),
+    (add_area, 'Area'),
 ]
 REMOVE_CASES = [
     (remove_list_category, 'List Category'),
     (remove_context, 'Context'),
+    (remove_area, 'Area'),
 ]
+
+
+class TestAddArea:
+    def test_creates_property_when_schema_predates_it(self):
+        """Older databases have no `Area` property until first used.
+
+        add_area must not KeyError on `schema['properties']['Area']` —
+        the PATCH should create the property fresh, no `gtd init
+        --upgrade` required.
+        """
+        schema = {'properties': {}}
+        with (
+            patch(
+                'gtd.notion.client.get_database_schema', return_value=schema
+            ),
+            patch('gtd.notion.client.get_projects_db_id', return_value=DB_ID),
+            patch(
+                'gtd.notion.client._patch', return_value=_ok_response()
+            ) as patch_mock,
+        ):
+            add_area('Health')
+
+        assert _patched_options(patch_mock, 'Area') == ['Health']
 
 
 class TestAddOption:
@@ -290,6 +320,45 @@ class TestRenameListCategory:
         assert _patched_options(patch_mock, 'List Category') == [
             'alpha',
             'beta',
+        ]
+
+
+class TestRenameArea:
+    def test_renames_target_and_preserves_others(self):
+        schema = _schema('Area', ['Health', 'Career', 'Family'])
+        with (
+            patch(
+                'gtd.notion.client.get_database_schema', return_value=schema
+            ),
+            patch('gtd.notion.client.get_projects_db_id', return_value=DB_ID),
+            patch(
+                'gtd.notion.client._patch', return_value=_ok_response()
+            ) as patch_mock,
+        ):
+            rename_area('Career', 'Work')
+
+        assert _patched_options(patch_mock, 'Area') == [
+            'Health',
+            'Work',
+            'Family',
+        ]
+
+    def test_unknown_option_leaves_options_unchanged(self):
+        schema = _schema('Area', ['Health', 'Career'])
+        with (
+            patch(
+                'gtd.notion.client.get_database_schema', return_value=schema
+            ),
+            patch('gtd.notion.client.get_projects_db_id', return_value=DB_ID),
+            patch(
+                'gtd.notion.client._patch', return_value=_ok_response()
+            ) as patch_mock,
+        ):
+            rename_area('nonexistent', 'Work')
+
+        assert _patched_options(patch_mock, 'Area') == [
+            'Health',
+            'Career',
         ]
 
 

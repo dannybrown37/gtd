@@ -188,65 +188,43 @@ def capture(header: tuple[str, ...]) -> None:
 @cli.group(invoke_without_command=True)
 @click.pass_context
 def areas(ctx: click.Context) -> None:
-    """Manage Horizons of Focus (Areas of Responsibility)."""
+    """Manage Areas of Focus (Notion 'Area' select options)."""
     if ctx.invoked_subcommand is None:
-        from gtd.storage import load_areas
+        from gtd.notion.client import get_areas
 
-        area_list = load_areas()
+        area_list = get_areas()
         if not area_list:
             click.echo('No horizons defined. Use: gtd areas add "Health"')
             return
-        for i, a in enumerate(area_list, 1):
-            notes = f'  — {a["notes"]}' if a.get('notes') else ''
-            click.echo(f'{i}. {a["name"]}{notes}')
+        for i, name in enumerate(area_list, 1):
+            click.echo(f'{i}. {name}')
 
 
 @areas.command('add')
 @click.argument('name')
-@click.option('--notes', default='', help='Optional description or reminder')
-def areas_add(name: str, notes: str) -> None:
-    """Add a new Horizon of Focus."""
-    from gtd.storage import load_areas, save_areas
+def areas_add(name: str) -> None:
+    """Add a new Area of Focus."""
+    from gtd.notion.client import add_area, get_areas
 
-    area_list = load_areas()
-    if any(a['name'].lower() == name.lower() for a in area_list):
+    if any(a.lower() == name.lower() for a in get_areas()):
         click.echo(f'Area "{name}" already exists.')
         return
-    area_list.append({'name': name, 'notes': notes})
-    save_areas(area_list)
+    add_area(name)
     click.echo(f'Added: {name}')
 
 
 @areas.command('remove')
 @click.argument('name')
 def areas_remove(name: str) -> None:
-    """Remove a Horizon of Focus."""
-    from gtd.storage import load_areas, save_areas
+    """Remove an Area of Focus."""
+    from gtd.notion.client import get_areas, remove_area
 
-    area_list = load_areas()
-    updated = [a for a in area_list if a['name'].lower() != name.lower()]
-    if len(updated) == len(area_list):
+    match = next((a for a in get_areas() if a.lower() == name.lower()), None)
+    if match is None:
         click.echo(f'Area "{name}" not found.')
         return
-    save_areas(updated)
-    click.echo(f'Removed: {name}')
-
-
-@areas.command('notes')
-@click.argument('name')
-@click.argument('notes')
-def areas_notes(name: str, notes: str) -> None:
-    """Update the notes/description for an area."""
-    from gtd.storage import load_areas, save_areas
-
-    area_list = load_areas()
-    for a in area_list:
-        if a['name'].lower() == name.lower():
-            a['notes'] = notes
-            save_areas(area_list)
-            click.echo(f'Updated notes for: {a["name"]}')
-            return
-    click.echo(f'Area "{name}" not found.')
+    remove_area(match)
+    click.echo(f'Removed: {match}')
 
 
 @cli.group(invoke_without_command=True)

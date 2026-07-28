@@ -8,10 +8,8 @@ from gtd import storage
 from gtd.storage import (
     _current_week_start,
     get_weekly_habit_date,
-    load_areas,
     load_review_state,
     reset_review_state,
-    save_areas,
     save_review_state,
     set_weekly_habit_date,
 )
@@ -24,7 +22,6 @@ def _isolated_storage(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         storage, 'HABITS_PATH', tmp_path / 'weekly_habits.json'
     )
-    monkeypatch.setattr(storage, 'AREAS_PATH', tmp_path / 'areas.json')
 
 
 class TestWeeklyHabitDate:
@@ -63,36 +60,6 @@ class TestWeeklyHabitDate:
             get_weekly_habit_date('weekly_review')
             == datetime.now().date().isoformat()
         )
-
-
-# ── load_areas / save_areas ──────────────────────────────────────────────────
-
-
-class TestLoadAndSaveAreas:
-    def test_returns_empty_list_when_file_missing(self) -> None:
-        assert load_areas() == []
-
-    def test_returns_areas_from_file(self, tmp_path: Path) -> None:
-        data = [{'name': 'Health', 'notes': ''}]
-        storage.AREAS_PATH.write_text(json.dumps(data) + '\n')
-        assert load_areas() == data
-
-    def test_save_writes_json_to_areas_path(self, tmp_path: Path) -> None:
-        areas = [{'name': 'Work', 'notes': 'Day job'}]
-        save_areas(areas)
-        assert storage.AREAS_PATH.exists()
-        assert json.loads(storage.AREAS_PATH.read_text()) == areas
-
-    def test_roundtrip_preserves_name_and_notes(self) -> None:
-        areas = [
-            {'name': 'Health', 'notes': 'exercise and sleep'},
-            {'name': 'Family', 'notes': ''},
-        ]
-        save_areas(areas)
-        loaded = load_areas()
-        assert loaded[0]['name'] == 'Health'
-        assert loaded[0]['notes'] == 'exercise and sleep'
-        assert loaded[1]['name'] == 'Family'
 
 
 # ── load_review_state / save_review_state / reset_review_state ───────────────

@@ -35,6 +35,9 @@ DB_SCHEMA: dict = {
     'List Category': {
         'select': {},
     },
+    'Area': {
+        'select': {},
+    },
     'Next Actionable Step': {
         'rich_text': {},
     },

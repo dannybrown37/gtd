@@ -1,4 +1,4 @@
-"""Local JSON I/O for weekly review state, areas of focus, and habit dates."""
+"""Local JSON I/O for weekly review state and habit dates."""
 
 import json
 from datetime import datetime, timedelta
@@ -8,14 +8,11 @@ from pathlib import Path
 __all__ = [
     'OUTPUT_PATH',
     'get_weekly_habit_date',
-    'load_areas',
-    'save_areas',
     'set_weekly_habit_date',
 ]
 
 OUTPUT_PATH = Path.home() / '.local' / 'share' / 'gtd'
 HABITS_PATH = OUTPUT_PATH / 'weekly_habits.json'
-AREAS_PATH = OUTPUT_PATH / 'areas.json'
 
 
 def get_weekly_habit_date(key: str) -> str | None:
@@ -73,14 +70,3 @@ def reset_review_state() -> None:
     data.pop('review_state', None)
     data.pop('weekly_review', None)
     HABITS_PATH.write_text(json.dumps(data, indent=2) + '\n')
-
-
-def load_areas() -> list[dict]:
-    """Return list of area dicts: {name: str, notes: str}."""
-    if not AREAS_PATH.exists():
-        return []
-    return json.loads(AREAS_PATH.read_text())
-
-
-def save_areas(areas: list[dict]) -> None:
-    AREAS_PATH.write_text(json.dumps(areas, indent=2) + '\n')

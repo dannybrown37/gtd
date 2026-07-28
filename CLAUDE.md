@@ -14,7 +14,7 @@ src/gtd/
 ├── gtd_tui.py      # Unified Textual TUI — GTDApp (main), all tab content widgets
 ├── tui.py          # Shared Textual widgets: modals, DetailPane, VimListView
 ├── api.py          # Flask HTTP wrapper for iOS Shortcuts / mobile access
-├── storage.py      # Local JSON I/O for weekly review state, areas, list categories (~/.local/share/gtd/)
+├── storage.py      # Local JSON I/O for weekly review state and habit dates (~/.local/share/gtd/)
 ├── ui.py           # fzf helpers (fzf_on_a_list), CancelAction
 └── notion/
     ├── client.py   # Notion REST API client (httpx)
@@ -76,16 +76,24 @@ Changes are collected (`_to_done: list`, `_status_changes: dict[str, str]`) and 
 
 `ProjectsBrowseScreen` collects three things — `_to_someday`, `_step_updates`, `_to_drop` (the `D` key, confirm-then-archive) — dismissed as a 3-tuple via `_result()` and applied in `_review_projects`.
 
+### Someday tab
+
+`SomedayContent` groups and sorts by **Area** (`ProjectEntry.area`), not Context — Context answers "what tool do I need to act on this," which is meaningless for something explicitly not actionable yet; Area answers "which part of my life is this in," which is what matters when reviewing Someday/Maybe. This mirrors the Lists tab's `List Category` pattern exactly: `Area` is its own Notion select property (`schema.py`), with its own CRUD in `client.py` (`get_areas`/`add_area`/`remove_area`/`rename_area`) and its own `ProjectEntry.area` field — entirely independent of Context.
+
+- `_rebuild_list()` shows every known area (even empty ones, labelled `(empty)`) plus a trailing `(no area)` bucket for unassigned entries — same shape as `ListsContent._rebuild_list`.
+- Keys: `(` assign/change an entry's Area (`SelectModal`, `(no area)` to clear), `+`/`-`/`)` add/remove/rename an Area itself (identical mechanics and key choices to Lists' category CRUD). Rename propagates to every entry carrying the old value, same as `action_rename_category`.
+- `L` (→ List) writes the chosen category into the `List Category` property via `build_property_update(list_category=...)` — it used to incorrectly write into `Context`, which polluted the Context select with list-category values.
+
 ### Other tabs
 
 - **Recurring** — Status == 'Recurring'; `L` log+reschedule (stays in list), `D` drop
 - **Waiting For** — Status == 'Waiting For'
 - **Incubation** — Current Project + follow_up > today
-- **Projects / Someday** — standard status filters
+- **Projects** — standard status filter
 
 ## Weekly Review — Areas of Focus (step 5)
 
-Each area loops until explicitly marked "All good". The prompt repeats for the same area after each capture, so multiple items can be captured before moving on. Escape exits the entire review early.
+`_review_areas` iterates `get_areas()` (Notion, not local JSON — see [Areas of Focus](#areas-of-focus)). Each area loops until explicitly marked "All good". The prompt repeats for the same area after each capture, so multiple items can be captured before moving on. Escape exits the entire review early.
 
 ## CelebrationScreen
 
@@ -112,23 +120,24 @@ Two-mode design: opens in **browse mode** (ListView focused, j/k navigate). **Ta
 |------|-------|----------|
 | GTD projects/inbox | Notion database | `NOTION_PROJECTS_DB_ID` env var |
 | Weekly habit completion | Local JSON | `~/.local/share/gtd/weekly_habits.json` |
-| Areas of Focus | Local JSON | `~/.local/share/gtd/areas.json` |
+| Areas of Focus | Notion select options | `Area` property on the projects DB |
 | List categories | Notion select options | `List Category` property on the projects DB |
 | GTD config | Local JSON | `~/.config/gtd/config.json` |
 
 ## Areas of Focus
 
-`load_areas()` / `save_areas(areas)` in `storage.py` manage `areas.json` — a list of `{name: str, notes: str}` dicts. `load_areas()` returns `[]` when the file is missing.
+`Area` is a Notion select property on the projects DB (`schema.py`), CRUD'd via `client.py`'s `get_areas()`/`add_area()`/`remove_area()`/`rename_area()` — the exact same mechanics as `List Category` (see [Someday tab](#someday-tab)). No local JSON, no notes field; the only description of an area is its name.
 
 **CLI commands** (`gtd areas`):
-- `gtd areas` — list all areas (name + notes if present); prints "No areas defined" when empty
-- `gtd areas add "Health"` — add new area; `--notes "..."` sets optional description; duplicate names rejected (case-insensitive)
+- `gtd areas` — list all areas; prints "No horizons defined" when empty
+- `gtd areas add "Health"` — add new area; duplicate names rejected (case-insensitive)
 - `gtd areas remove "Health"` — remove area by name (case-insensitive)
-- `gtd areas notes "Health" "some notes"` — update notes field for existing area
+
+**TUI**: the Someday/Maybe tab also manages areas directly (`+`/`-`/`)` keys) — CLI and TUI both operate on the same Notion select options, so neither is authoritative over the other.
 
 ## Key Models
 
-**ProjectEntry** (Notion-backed): `page_id`, `header`, `status`, `context`, `next_step`, `due_date`, `follow_up_date`
+**ProjectEntry** (Notion-backed): `page_id`, `header`, `status`, `context`, `next_step`, `due_date`, `follow_up_date`, `list_category`, `area`
 
 **STATUSES** (schema.py): includes `'Recurring'` — items surface on Today when follow_up_date ≤ today; `action_mark_done` on recurring items offers Reschedule vs Permanently complete. Run `gtd init --upgrade` to add new statuses to an existing Notion DB.
 

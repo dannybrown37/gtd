@@ -58,10 +58,9 @@ without opening the TUI:
 | `gtd defer` | Defer a project by setting a follow-up date. |
 | `gtd someday` | Review Someday/Maybe items — keep, activate, or drop. |
 | `gtd capture` | Quick-capture an item to the GTD inbox. |
-| `gtd areas` | Manage Horizons of Focus (Areas of Responsibility). |
-| `gtd areas add` | Add a new Horizon of Focus. |
-| `gtd areas remove` | Remove a Horizon of Focus. |
-| `gtd areas notes` | Update the notes/description for an area. |
+| `gtd areas` | Manage Areas of Focus (Notion 'Area' select options). |
+| `gtd areas add` | Add a new Area of Focus. |
+| `gtd areas remove` | Remove an Area of Focus. |
 | `gtd contexts` | Manage GTD contexts (Computer, Home, Phone, etc.). |
 | `gtd contexts add` | Add a new context. |
 | `gtd contexts remove` | Remove a context. |
@@ -160,7 +159,7 @@ src/gtd/
 ├── api.py          # Thin Flask wrapper around GTD Notion operations for iOS Shortcuts.
 ├── cli.py          # GTD CLI — David Allen's Getting Things Done powered by Notion.
 ├── gtd_tui.py      # Unified GTD TUI.
-├── storage.py      # Local JSON I/O for weekly review state, areas of focus, and habit dates.
+├── storage.py      # Local JSON I/O for weekly review state and habit dates.
 ├── tui.py          # Shared Textual widgets and modals for the GTD TUI.
 ├── ui.py           # fzf helpers, prompts, and formatting shared across CLI commands.
 └── notion/

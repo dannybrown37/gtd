@@ -1756,11 +1756,12 @@ class SomedayBrowseScreen(ModalScreen):
 
 
 async def _review_areas(app: App) -> int:
-    """Walk through Horizons of Focus, prompt for inbox captures."""
+    """Walk through Areas of Focus, prompt for inbox captures."""
     from gtd.notion.capture import _create_page
-    from gtd.storage import load_areas
+    from gtd.notion.client import get_areas
 
-    areas = load_areas()
+    loop = asyncio.get_running_loop()
+    areas = await loop.run_in_executor(None, get_areas)
     if not areas:
         app.notify(
             'No horizons defined. Run: gtd areas add "Health"',
@@ -1768,12 +1769,9 @@ async def _review_areas(app: App) -> int:
         )
         return 0
 
-    loop = asyncio.get_running_loop()
     reviewed = 0
-    for area in areas:
-        name = area['name']
-        notes = area.get('notes', '')
-        title = f'Area: {name}' + (f'\n[dim]{notes}[/dim]' if notes else '')
+    for name in areas:
+        title = f'Area: {name}'
         while True:
             action = await app.push_screen_wait(
                 SelectModal(
@@ -3340,7 +3338,7 @@ class WaitingForContent(BaseEntryContent):
 
 
 class SomedayContent(BaseEntryContent):
-    """Someday/Maybe — ideas parked for later review."""
+    """Someday/Maybe — ideas parked for later review, grouped by Area."""
 
     TITLE: ClassVar[str] = 'Someday'
     EMPTY_MSG: ClassVar[str] = 'No someday items.'
@@ -3351,7 +3349,29 @@ class SomedayContent(BaseEntryContent):
         Binding('U', 'update_entry', 'Update'),
         Binding('N', 'edit_notes', 'Notes'),
         Binding('D', 'drop_entry', 'Drop'),
+        Binding('(', 'set_area', 'Assign Area'),
+        Binding('+', 'add_area', 'New Area'),
+        Binding('-', 'remove_area', 'Remove Area'),
+        Binding(')', 'rename_area', 'Rename Area'),
     ]
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._notion_areas: list[str] = []
+
+    def on_mount(self) -> None:
+        self._load_notion_areas()
+        super().on_mount()
+
+    @work(thread=True)
+    def _load_notion_areas(self) -> None:
+        """Load areas of focus from Notion."""
+        from gtd.notion.client import get_areas
+
+        try:
+            self._notion_areas = get_areas()
+        except Exception:
+            self._notion_areas = []
 
     def _build_filter(self) -> dict:
         return {
@@ -3359,18 +3379,25 @@ class SomedayContent(BaseEntryContent):
             'select': {'equals': 'Someday/Maybe'},
         }
 
+    def _all_areas(self) -> list[str]:
+        """Return all areas from Notion + any extras found on entries."""
+        seen = set(self._notion_areas)
+        extras = sorted(
+            e.area for e in self._entries if e.area and e.area not in seen
+        )
+        return sorted(self._notion_areas) + list(dict.fromkeys(extras))
+
     async def _set_entries(self, entries: list[ProjectEntry]) -> None:
         entries.sort(
             key=lambda e: (
-                e.context or '\xff',
+                e.area or '\xff',
                 e.due_date or '\xff',
             )
         )
         self._entries = entries
         with contextlib.suppress(Exception):
             self.query_one('#entry-loading', LoadingIndicator).display = False
-        lv = self.query_one('#entry-list', VimListView)
-        await repopulate(lv, _context_grouped_items(entries, EntryListItem))
+        await self._rebuild_list()
         header = self.query_one('#entry-list-header', Static)
         detail = self.query_one('#entry-detail', Static)
         if not entries:
@@ -3379,6 +3406,29 @@ class SomedayContent(BaseEntryContent):
         else:
             header.update(f'{self.TITLE}  [dim]({len(entries)})[/dim]')
             self._update_detail()
+
+    async def _rebuild_list(self) -> None:
+        by_area: dict[str, list[ProjectEntry]] = {}
+        for e in self._entries:
+            by_area.setdefault(e.area or '', []).append(e)
+
+        rows: list[ListItem] = []
+        for area in sorted(self._all_areas()):
+            items = by_area.get(area, [])
+            items.sort(key=lambda e: (e.due_date or '\xff', e.header))
+            n = len(items)
+            label = f'{area}  ({n})' if n else f'{area}  [dim](empty)[/dim]'
+            rows.append(SeparatorListItem(label))
+            rows.extend(EntryListItem(entry) for entry in items)
+
+        unassigned = by_area.get('', [])
+        if unassigned:
+            unassigned.sort(key=lambda e: (e.due_date or '\xff', e.header))
+            rows.append(SeparatorListItem(f'(no area)  ({len(unassigned)})'))
+            rows.extend(EntryListItem(entry) for entry in unassigned)
+
+        lv = self.query_one('#entry-list', VimListView)
+        await repopulate(lv, rows)
 
     def _current_entry(self) -> ProjectEntry | None:
         item = self.query_one('#entry-list', VimListView).highlighted_child
@@ -3412,11 +3462,127 @@ class SomedayContent(BaseEntryContent):
 
         update_page(
             page_id,
-            {
-                **build_property_update(status='List'),
-                'Context': {'select': {'name': category}},
-            },
+            build_property_update(status='List', list_category=category),
         )
+
+    @work
+    async def action_set_area(self) -> None:
+        from gtd.notion.client import build_property_update, update_page
+
+        entry = self._current_entry()
+        if not entry:
+            return
+        options = ['(no area)', *sorted(self._all_areas())]
+        choice = await self.app.push_screen_wait(
+            SelectModal('Assign area', options)
+        )
+        if not choice:
+            return
+        area = '' if choice == '(no area)' else choice
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(
+            None,
+            lambda: update_page(
+                entry.page_id, build_property_update(area=area)
+            ),
+        )
+        self._load_entries()
+        self.app.notify(f'✓ "{entry.header.strip()}" → {choice}')
+
+    @work
+    async def action_add_area(self) -> None:
+        from gtd.notion.client import add_area
+
+        name = await self.app.push_screen_wait(
+            InputModal('New area of focus', 'Area name')
+        )
+        if not name or not name.strip():
+            return
+        name = name.strip()
+        if name in self._notion_areas:
+            self.app.notify(f'"{name}" already exists', severity='warning')
+            return
+        try:
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, add_area, name)
+            self._notion_areas = sorted([*self._notion_areas, name])
+            await self._rebuild_list()
+            self.app.notify(f'✓ Added area "{name}"')
+        except Exception as e:
+            self.app.notify(f'Failed to add area: {e}', severity='error')
+
+    @work
+    async def action_remove_area(self) -> None:
+        from gtd.notion.client import remove_area
+
+        if not self._notion_areas:
+            self.app.notify('No areas to remove', severity='warning')
+            return
+        area = await self.app.push_screen_wait(
+            SelectModal('Remove area', sorted(self._notion_areas))
+        )
+        if not area:
+            return
+        items = [e for e in self._entries if e.area == area]
+        if items:
+            confirmed = await self.app.push_screen_wait(
+                ConfirmModal(
+                    f'"{area}" has {len(items)} item(s). Remove anyway?'
+                )
+            )
+            if not confirmed:
+                return
+        try:
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, remove_area, area)
+            self._notion_areas = [a for a in self._notion_areas if a != area]
+            await self._rebuild_list()
+            self.app.notify(f'✓ Removed area "{area}"')
+        except Exception as e:
+            self.app.notify(f'Failed to remove area: {e}', severity='error')
+
+    @work
+    async def action_rename_area(self) -> None:
+        from gtd.notion.client import rename_area, update_page
+
+        if not self._notion_areas:
+            self.app.notify('No areas to rename', severity='warning')
+            return
+        old = await self.app.push_screen_wait(
+            SelectModal('Rename which area?', sorted(self._notion_areas))
+        )
+        if not old:
+            return
+        new = await self.app.push_screen_wait(
+            InputModal('Rename area', 'New name', initial=old)
+        )
+        if not new or not new.strip() or new.strip() == old:
+            return
+        new = new.strip()
+        if new in self._notion_areas:
+            self.app.notify(f'"{new}" already exists', severity='warning')
+            return
+        try:
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, rename_area, old, new)
+            affected = [e for e in self._entries if e.area == old]
+            for entry in affected:
+                await loop.run_in_executor(
+                    None,
+                    lambda eid=entry.page_id: update_page(
+                        eid, {'Area': {'select': {'name': new}}}
+                    ),
+                )
+            self._notion_areas = [
+                new if a == old else a for a in self._notion_areas
+            ]
+            self._load_entries()
+            self.app.notify(
+                f'✓ Renamed "{old}" → "{new}"'
+                + (f' ({len(affected)} items updated)' if affected else '')
+            )
+        except Exception as e:
+            self.app.notify(f'Failed to rename area: {e}', severity='error')
 
 
 # ── Snoozed content ──────────────────────────────────────────────────────────
@@ -3763,6 +3929,7 @@ class ListsContent(BaseEntryContent):
         self._remove_entry_and_refocus(entry.page_id)
         self.app.notify(f'✓ "{entry.header.strip()}" → {dest}')
 
+    @work
     async def action_add_category(self) -> None:
         from gtd.notion.client import add_list_category
 
@@ -3784,6 +3951,7 @@ class ListsContent(BaseEntryContent):
         except Exception as e:
             self.app.notify(f'Failed to add category: {e}', severity='error')
 
+    @work
     async def action_remove_category(self) -> None:
         from gtd.notion.client import remove_list_category
 
@@ -3817,6 +3985,7 @@ class ListsContent(BaseEntryContent):
                 f'Failed to remove category: {e}', severity='error'
             )
 
+    @work
     async def action_rename_category(self) -> None:
         from gtd.notion.client import rename_list_category, update_page
 

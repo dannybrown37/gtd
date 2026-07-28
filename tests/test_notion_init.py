@@ -106,6 +106,7 @@ class TestUpgradeSchema:
                 'Status': _select_prop(STATUSES),
                 'Context': {'select': {}},
                 'List Category': {'select': {}},
+                'Area': {'select': {}},
                 'Next Actionable Step': {'rich_text': {}},
                 'Success Condition': {'rich_text': {}},
                 'Due Date': {'date': {}},
@@ -125,6 +126,7 @@ class TestUpgradeSchema:
                 'Status': _select_prop(STATUSES),
                 'Context': {'select': {}},
                 'List Category': {'select': {}},
+                'Area': {'select': {}},
                 'Next Actionable Step': {'rich_text': {}},
                 'Success Condition': {'rich_text': {}},
                 'Due Date': {'date': {}},
@@ -189,11 +191,12 @@ class TestUpgradeSchema:
         assert triage['color'] == 'purple'
 
     def test_optionless_select_properties_are_left_alone(self):
-        """Context/List Category are managed in Notion, not by DB_SCHEMA."""
+        """Context/List Category/Area are managed in Notion, not DB_SCHEMA."""
         existing = _existing_schema(
             {
                 'Context': _select_prop(['@home', '@work']),
                 'List Category': _select_prop(['Books']),
+                'Area': _select_prop(['Health']),
             },
         )
         changes, patch_mock = self._run(existing)
@@ -201,6 +204,7 @@ class TestUpgradeSchema:
         patched = _patched_props(patch_mock)
         assert 'Context' not in patched
         assert 'List Category' not in patched
+        assert 'Area' not in patched
         assert not any('Context' in c for c in changes)
 
     def test_empty_schema_adds_every_property(self):
@@ -212,6 +216,7 @@ class TestUpgradeSchema:
             'Status',
             'Context',
             'List Category',
+            'Area',
             'Next Actionable Step',
             'Success Condition',
             'Due Date',
