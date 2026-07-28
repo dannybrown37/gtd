@@ -1,6 +1,6 @@
 [project]
 name = "gtd-tui"
-version = "0.2.0"
+version = "0.0.0"
 description = "GTD + 12-Week Year CLI powered by Notion"
 readme = "README.md"
 license = "MIT"
@@ -66,6 +66,14 @@ docstring-code-format = true
 
 [dependency-groups]
 dev = [
+    "commitizen>=4.10.0",
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",
 ]
+
+[tool.commitizen]
+name = "cz_conventional_commits"
+version_provider = "pep621"
+tag_format = "v$version"
+major_version_zero = true
+update_changelog_on_bump = true

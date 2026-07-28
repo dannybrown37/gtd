@@ -36,3 +36,24 @@ jobs:
 
       - name: Run tests
         run: uv run --extra api pytest --cov=src --cov-report=term-missing tests/
+
+  bump:
+    needs: [lint, test]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && !startsWith(github.event.head_commit.message, 'bump:')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create bump commit and tag
+        id: cz
+        uses: commitizen-tools/commitizen-action@0.24.0
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          changelog_increment_filename: body.md
+          # no_raise defaults to "21" (NO_COMMITS_TO_BUMP) — pushes with no
+          # feat/fix-type commits since the last tag are a no-op, not a failure.

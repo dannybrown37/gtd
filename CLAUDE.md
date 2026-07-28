@@ -167,3 +167,35 @@ All responses are JSON. Entry objects match `ProjectEntry` fields.
 - Python 3.12+, Textual ≥ 0.71, Pydantic ≥ 2, httpx, click, python-dateutil
 - Optional: Flask ≥ 3.1 (install with `uv pip install "gtd[api]"`)
 - After any code change: `uv tool install -e .` to update the installed `gtd` binary
+
+## Releasing to PyPI
+
+Release is fully automated — the only thing that drives it is commit message format.
+Write commits as Conventional Commits (`feat:`, `fix:`, `chore:`, etc.) and everything
+else happens in CI:
+
+1. Push to `main` → `ci.yml`'s `lint`/`test` jobs run.
+2. If they pass, the `bump` job runs `commitizen-tools/commitizen-action`, which reads
+   commits since the last tag, decides the version bump, updates `pyproject.toml` +
+   `CHANGELOG.md`, commits (`bump: ...`), and pushes the tag. If no commits since the
+   last tag warrant a bump (e.g. a docs/chore-only push), this is a silent no-op
+   (`no_raise: "21"` — `NO_COMMITS_TO_BUMP` isn't a failure).
+3. The pushed `v*` tag triggers `publish.yml`, which builds and publishes to PyPI via
+   trusted publishing (OIDC, no stored token).
+
+Versioning config lives in `[tool.commitizen]` in `pyproject.toml`
+(`version_provider = "pep621"` — bumps `[project].version` directly; `tag_format =
+"v$version"` matches the publish trigger; `major_version_zero = true` keeps bumps in
+the `0.x` range pre-1.0). Pre-commitizen commit history doesn't follow Conventional
+Commits — that's fine, only commits since the last tag are considered.
+
+**Repo prerequisites for the `bump` job to be able to push:**
+- Settings → Actions → General → Workflow permissions must be "Read and write
+  permissions" (otherwise `GITHUB_TOKEN` can't push the bump commit/tag).
+- If `main` has branch protection requiring PRs/status checks, the bump job's direct
+  push will be rejected unless `github-actions[bot]` is allowed to bypass it.
+- The PyPI trusted publisher (pypi.org → project `gtd-tui` → repo `dannybrown37/gtd`,
+  workflow `publish.yml`, environment `pypi`) must be registered before the first tag
+  push, or `publish.yml` will fail with an auth error.
+
+You can still bump manually with `uv run cz bump` if needed — CI does the same thing.
