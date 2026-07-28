@@ -55,5 +55,9 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           changelog_increment_filename: body.md
+          # actions/checkout leaves HEAD detached even on push events, so the
+          # action's own `git branch --show-current` fallback resolves to "" —
+          # pass the branch explicitly or the push step silently no-ops.
+          branch: ${{ github.ref_name }}
           # no_raise defaults to "21" (NO_COMMITS_TO_BUMP) — pushes with no
           # feat/fix-type commits since the last tag are a no-op, not a failure.
