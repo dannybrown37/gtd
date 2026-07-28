@@ -65,6 +65,18 @@ jobs:
           POST_SHA="$(git rev-parse HEAD)"
           if [[ "$PRE_SHA" != "$POST_SHA" ]]; then
             echo "bumped=true" >>"$GITHUB_OUTPUT"
+
+            # cz bump only touches pyproject.toml's version, so uv.lock's
+            # embedded gtd-tui version drifts. Re-lock and fold the result
+            # into the bump commit, keeping the tag on that same commit.
+            uv lock
+            if ! git diff --quiet -- uv.lock; then
+              TAG="$(git describe --tags --exact-match HEAD)"
+              git tag -d "$TAG"
+              git add uv.lock
+              git commit --amend --no-edit
+              git tag "$TAG"
+            fi
           else
             echo "bumped=false" >>"$GITHUB_OUTPUT"
           fi
