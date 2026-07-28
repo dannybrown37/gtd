@@ -1882,6 +1882,7 @@ class TodayContent(BaseEntryContent):
         Binding('N', 'edit_notes', 'Notes'),
         Binding('D', 'mark_done', 'Done'),
         Binding('U', 'update_entry', 'Update'),
+        Binding('F', 'filter_context', 'Filter ctx'),
     ]
 
     _GTD_ACTIONS: ClassVar[set[str]] = {
@@ -1897,6 +1898,7 @@ class TodayContent(BaseEntryContent):
     def __init__(self) -> None:
         super().__init__()
         self._habit_items: list[WeeklyHabitItem] = []
+        self._ctx_filter: str | None = None
 
     def _build_filter(self) -> dict:
         return {}
@@ -1915,6 +1917,11 @@ class TodayContent(BaseEntryContent):
             )
             self.app.call_from_thread(self._set_entries, [])
 
+    def _filtered_entries(self) -> list[ProjectEntry]:
+        if self._ctx_filter:
+            return [e for e in self._entries if e.context == self._ctx_filter]
+        return self._entries
+
     async def _populate_list(
         self,
         lv: VimListView,
@@ -1923,10 +1930,11 @@ class TodayContent(BaseEntryContent):
         items: list[ListItem] = list(self._habit_items)
         if self._habit_items and entries:
             items.append(SeparatorListItem('GTD'))
-        items.extend(NextStepListItem(entry) for entry in entries)
+        items.extend(_context_grouped_items(entries, NextStepListItem))
         await repopulate(lv, items)
 
     async def _set_entries(self, entries: list[ProjectEntry]) -> None:
+        entries.sort(key=lambda e: (e.context or '\xff', e.header.lower()))
         self._entries = entries
         with contextlib.suppress(Exception):
             self.query_one('#entry-loading', LoadingIndicator).display = False
@@ -1937,17 +1945,35 @@ class TodayContent(BaseEntryContent):
             if not _habit_done_this_week(key)
         ]
 
+        await self._rebuild_list()
+
+    async def _rebuild_list(self) -> None:
+        filtered = self._filtered_entries()
         lv = self.query_one('#entry-list', VimListView)
-        await self._populate_list(lv, entries)
+        await self._populate_list(lv, filtered)
 
         header = self.query_one('#entry-list-header', Static)
         detail = self.query_one('#entry-detail', Static)
-        has_content = entries or self._habit_items
+        ctx_badge = (
+            f'  [yellow][{self._ctx_filter}][/yellow]'
+            if self._ctx_filter
+            else ''
+        )
+        has_content = filtered or self._habit_items
         if not has_content:
-            header.update('Today — nothing actionable 🎉')
-            detail.update('[dim]All clear. Nice work.[/dim]')
+            if self._ctx_filter:
+                header.update(f'Today — empty{ctx_badge}')
+                detail.update(
+                    f'[dim]No items in context "{self._ctx_filter}".[/dim]'
+                )
+            else:
+                header.update('Today — nothing actionable 🎉')
+                detail.update('[dim]All clear. Nice work.[/dim]')
         else:
-            header.update(f'Today  [dim]({len(entries)})[/dim]')
+            total = len(self._entries)
+            shown = len(filtered)
+            count = f'({shown}/{total})' if self._ctx_filter else f'({total})'
+            header.update(f'Today  [dim]{count}[/dim]{ctx_badge}')
             self._update_detail()
 
     @on(ListView.Highlighted, '#entry-list')
@@ -1994,7 +2020,21 @@ class TodayContent(BaseEntryContent):
             return habit_focused
         if action in self._GTD_ACTIONS:
             return not habit_focused
+        if action == 'filter_context':
+            return True
         return None
+
+    @work
+    async def action_filter_context(self) -> None:
+        contexts = sorted({e.context for e in self._entries if e.context})
+        options = ['(All)', *contexts]
+        choice = await self.app.push_screen_wait(
+            SelectModal('Filter by context', options)
+        )
+        if choice is None:
+            return
+        self._ctx_filter = None if choice == '(All)' else choice
+        await self._rebuild_list()
 
     @work
     async def action_complete_habit(self) -> None:
