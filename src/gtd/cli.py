@@ -488,8 +488,12 @@ def config_notes_editor(mode: str) -> None:
     save_config(cfg)
     click.echo(f'notes_editor → {mode}')
 
+
+@cli.command()
+@click.pass_context
+def fzf(ctx: click.Context) -> None:
     """Launch the legacy fzf-based interactive GTD menu."""
-    _interactive_menu(verbose=False)
+    _interactive_menu(verbose=ctx.obj.get('verbose', False))
 
 
 @cli.command()

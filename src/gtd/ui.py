@@ -1,3 +1,5 @@
+"""fzf helpers, prompts, and formatting shared across CLI commands."""
+
 import subprocess
 from typing import Literal, overload
 

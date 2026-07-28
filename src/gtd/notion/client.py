@@ -1,3 +1,5 @@
+"""Notion REST API client (httpx)."""
+
 import os
 import sys
 from http import HTTPStatus

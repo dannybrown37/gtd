@@ -28,13 +28,59 @@ This installs the `gtd` command.
 
 ## Usage
 
-### GTD interactive mode
+### Default: the TUI
 
 ```bash
 gtd
 ```
 
-Opens the fzf-powered GTD menu:
+With no subcommand, `gtd` launches the Textual TUI — tabs for Today, Next
+Steps, Inbox, Projects, Waiting For, Incubation, Recurring, Someday, and
+Lists, plus a guided Weekly Review. This is the primary interface.
+
+### CLI subcommands
+
+Each of these also works standalone, e.g. for scripting or quick one-offs
+without opening the TUI:
+
+<!-- BEGIN CLI -->
+| Command | Description |
+| --- | --- |
+| `gtd init` | Set up or upgrade the GTD Notion database. |
+| `gtd triage` | Interactively process items needing triage. |
+| `gtd filter` | Filter by context name (e.g. gtd filter Phone). |
+| `gtd today` | Show actionable items for today. |
+| `gtd snooze` | Snooze today's items until tomorrow. |
+| `gtd log` | Log a note and reschedule a recurring item. |
+| `gtd done` | Mark a current project as done (archives it). |
+| `gtd review` | Run the GTD weekly review ritual. |
+| `gtd update` | Update fields on an existing project. |
+| `gtd defer` | Defer a project by setting a follow-up date. |
+| `gtd someday` | Review Someday/Maybe items — keep, activate, or drop. |
+| `gtd capture` | Quick-capture an item to the GTD inbox. |
+| `gtd areas` | Manage Horizons of Focus (Areas of Responsibility). |
+| `gtd areas add` | Add a new Horizon of Focus. |
+| `gtd areas remove` | Remove a Horizon of Focus. |
+| `gtd areas notes` | Update the notes/description for an area. |
+| `gtd contexts` | Manage GTD contexts (Computer, Home, Phone, etc.). |
+| `gtd contexts add` | Add a new context. |
+| `gtd contexts remove` | Remove a context. |
+| `gtd contexts rename` | Rename a context and update all items with that context. |
+| `gtd dump` | Rapid-fire brain dump — capture everything, triage later. |
+| `gtd config` | View or set GTD configuration. |
+| `gtd config notes-editor` | Set notes editor: inline (TUI TextArea) or external (uses $EDITOR). |
+| `gtd fzf` | Launch the legacy fzf-based interactive GTD menu. |
+| `gtd tui` | Launch the interactive GTD TUI. |
+| `gtd api` | Start the GTD HTTP API server (requires: pip install gtd[api]). |
+<!-- END CLI -->
+
+### Legacy fzf menu
+
+```bash
+gtd fzf
+```
+
+An older fzf-driven menu predating the TUI, kept for anyone who prefers it:
 
 <!-- BEGIN MENU -->
 | Category | Action |
@@ -54,22 +100,6 @@ Opens the fzf-powered GTD menu:
 | View | View all projects |
 | View | Filter by context |
 <!-- END MENU -->
-
-### GTD subcommands
-
-```bash
-gtd init             # Set up a new GTD Notion database
-gtd init --upgrade   # Add missing properties/options to existing DB
-gtd triage           # Process inbox items
-gtd review           # Guided weekly review ritual
-gtd dump             # Rapid-fire brain dump
-gtd filter work      # Filter projects by context
-gtd today            # Show today's actionable items
-gtd capture          # Quick-capture to inbox
-gtd done             # Mark a project as done
-gtd update           # Update project fields
-gtd defer            # Defer a project
-```
 
 ## HTTP API
 
@@ -103,16 +133,19 @@ your own token.
 
 ## Updating this README
 
-The menu table and the HTTP API table above are both extracted from source
-(`cli.py`'s `menu_items` and the `@app.get`/`@app.post`/... routes in
-`api.py`, respectively). After changing either, regenerate both:
+The fzf menu table, CLI command table, project tree, and HTTP API table above
+are all extracted from source: `cli.py`'s `menu_items` list and click command
+tree, module docstrings under `src/gtd/` and `scripts/`, and the
+`@app.get`/`@app.post`/... routes in `api.py`, respectively. After changing
+any of these, regenerate everything:
 
 ```bash
 python scripts/update_readme.py
 ```
 
-A pre-commit hook (`sync-readme`) runs this automatically whenever `cli.py`,
-`api.py`, or `README.md` changes, so the tables shouldn't drift in practice.
+A pre-commit hook (`sync-readme`) runs this automatically whenever any
+`src/gtd/**/*.py`, `scripts/**/*.py`, or `README.md` file changes, so these
+sections shouldn't drift in practice.
 
 ## Data storage
 
@@ -121,22 +154,30 @@ A pre-commit hook (`sync-readme`) runs this automatically whenever `cli.py`,
 
 ## Project structure
 
+<!-- BEGIN TREE -->
 ```
 src/gtd/
-├── gtd.py           # GTD interactive menu and CLI commands
-├── gtd_tui.py       # Textual TUI
-├── storage.py       # File I/O and path management
-├── ui.py            # fzf helpers, prompts, formatting
+├── api.py          # Thin Flask wrapper around GTD Notion operations for iOS Shortcuts.
+├── cli.py          # GTD CLI — David Allen's Getting Things Done powered by Notion.
+├── gtd_tui.py      # Unified GTD TUI.
+├── storage.py      # Local JSON I/O for weekly review state, areas of focus, and habit dates.
+├── tui.py          # Shared Textual widgets and modals for the GTD TUI.
+├── ui.py           # fzf helpers, prompts, and formatting shared across CLI commands.
 └── notion/
-    ├── client.py    # Notion API client
-    ├── config.py    # Config file management (~/.config/gtd/)
-    ├── schema.py    # Database schema definition
-    ├── init.py      # Database creation and upgrades
-    ├── models.py    # ProjectEntry dataclass
-    ├── commands.py  # GTD command implementations
-    ├── capture.py   # Inbox capture
-    ├── triage.py    # Triage processing
-    └── display.py   # Entry formatting
+    ├── capture.py  # Quick-capture items to the GTD inbox (Notion Projects table).
+    ├── client.py   # Notion REST API client (httpx).
+    ├── commands.py # Manage commands: mark done, defer, waiting for, notion dispatch.
+    ├── config.py   # Configuration management for GTD CLI.
+    ├── display.py  # Display formatting for Notion entries.
+    ├── entries.py  # Entry listing, selection, and field editing.
+    ├── init.py     # Database initialization and schema management for GTD CLI.
+    ├── log.py      # Log, reschedule, and recurring-item utilities.
+    ├── models.py   # Parse Notion page properties into simple data structures.
+    ├── review.py   # Weekly review and Someday/Maybe review flows.
+    ├── schema.py   # GTD Notion database schema definition — single source of truth.
+    ├── today.py    # Today view and snooze commands.
+    └── triage.py   # Interactive triage flow for processing inbox items.
 scripts/
-└── update_readme.py # Auto-update README menu section
+└── update_readme.py # Update README.md menu, CLI, tree, and HTTP API sections from source.
 ```
+<!-- END TREE -->
