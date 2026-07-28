@@ -63,3 +63,10 @@ jobs:
           # debug surfaces the real traceback if this still fails silently —
           # drop once the pipeline is verified working end-to-end.
           debug: true
+          # BOOTSTRAP ONLY: `cz bump --changelog` hardcodes an incremental
+          # changelog diff against the previous tag, which crashes with
+          # NoRevisionError when the repo has zero tags. Re-enable
+          # `changelog: true` (or remove this line, true is the default) in a
+          # follow-up commit once v0.1.0 exists — every bump after the first
+          # will have a prior tag to diff against.
+          changelog: false
