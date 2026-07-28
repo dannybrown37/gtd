@@ -1,0 +1,55 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: end-of-file-fixer
+      - id: check-executables-have-shebangs
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-symlinks
+      - id: check-toml
+      - id: check-yaml
+      - id: destroyed-symlinks
+      - id: mixed-line-ending
+
+  - repo: https://github.com/scop/pre-commit-shfmt
+    rev: v3.8.0-1
+    hooks:
+      - id: shfmt
+        args: ["-i", "4"]
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: Ruff check
+        entry: ruff check --fix
+        language: system
+        types: [python]
+        pass_filenames: true
+
+      - id: ruff-format
+        name: Ruff format
+        entry: bash -c 'ruff format "$@" && git add "$@"' --
+        language: system
+        types: [python]
+        pass_filenames: true
+        require_serial: true
+
+      - id: sync-readme
+        name: Sync README menu
+        entry: bash -c 'uv run python scripts/update_readme.py && git add README.md'
+        language: system
+        files: ^(src/gtd/cli\.py|README\.md)$
+        pass_filenames: false
+
+      - id: tests
+        name: Tests
+        entry: bash -c 'uv run --extra api pytest tests/ -q'
+        language: system
+        files: ^(src/|tests/).*
+        pass_filenames: false
