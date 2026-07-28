@@ -38,14 +38,17 @@ All entry tabs extend `BaseEntryContent(Vertical)` with stable IDs (`#entry-list
 
 ### Today tab
 
-The Today tab has three sections in the left list:
+The Today tab has two sections in the left list:
 
-1. **Weekly habit reminders** (top, always) — shown when not done this week:
+1. **Weekly habit reminders** (top, always listed — done or not):
    - `● Weekly Review` — `W` opens a guided 6-step flow via `WeeklyReviewScreen` modal. Steps: (1) Triage Inbox, (2) Review Projects, (3) Review Waiting For, (4) Review Someday/Maybe [uses `SomedayBrowseScreen`], (5) Review Areas of Focus, (6) Plan next week's priorities + Review Calendar [manual steps]. State persisted per-week in `weekly_habits.json` under `review_state`; resumes at first incomplete step.
+   - Pending: red `●` + `not done this week`. Done: green `●` + `last: <when>` (`_habit_last_done_str`). The row never disappears — `_mark_habit_done` flips it in place via `WeeklyHabitItem.refresh_label()`, and `W` stays available to re-run the review.
    - Uses `check_action` to show `W` only when habit item is focused
    - Completion stored in `~/.local/share/gtd/weekly_habits.json`; resets each Monday
 
-2. **GTD entries** — standard entries from Notion, separated with `── GTD ──` when habits are present
+2. **GTD entries** — standard entries from Notion, grouped by context. No divider between the habit rows and the entries.
+
+The Today header count and its "nothing actionable 🎉" empty state describe the GTD entries only, since a habit row is always present.
 
 **`check_action` in TodayContent** — two mutually exclusive modes:
 - `_HABIT_ACTIONS = {'complete_habit'}` — only active when habit focused
@@ -127,7 +130,8 @@ Two-mode design: opens in **browse mode** (ListView focused, j/k navigate). **Ta
 - `VimListView(ListView)` — adds j/k/G/gg bindings; k at index 0 posts `FocusTabBar`. `G`/`gg` move the *highlight* to the last/first enabled item (skipping `SeparatorListItem`s), not just the scroll offset. `gg` is a two-key sequence: the first `g` sets `_awaiting_second_g`, and `on_key` clears it on any other key.
 - `DetailPane(ScrollableContainer)` — `can_focus = False` so Tab skips it
 - `SeparatorListItem(ListItem)` — `disabled=True`, used as visual dividers; supports markup in label
-- `WeeklyHabitItem(ListItem)` — habit reminder item with `habit_key` and `habit_label` attrs
+- `WeeklyHabitItem(ListItem)` — habit reminder item with `habit_key` and `habit_label` attrs; `_label_markup()` renders the row and `refresh_label()` re-renders it in place. Do **not** name such a method `_render` — that's a `Widget` internal and overriding it breaks rendering.
+- **Removing list items** — always use `remove_list_item(lv, item)` (`tui.py`), never bare `item.remove()`. `ListItem.remove()` leaves `ListView.index` alone, so removing the highlighted item leaves the index on whatever slides into its place without ever highlighting it — the list looks unhighlighted while actions still operate on it. Most visible with one item left, where j/k can't re-fire the watcher. The helper mirrors `ListView.pop`'s index fixup and skips separators.
 - Modals: `InputModal`, `SelectModal`, `ConfirmModal`, `TwoFieldModal`, `SomedayBrowseScreen` — all `ModalScreen`
 - `ENABLE_COMMAND_PALETTE = False` on `GTDApp`
 - Use `@work` for ALL async actions that call `push_screen_wait` — required in both standalone and embedded contexts. `@work(thread=True)` for blocking Notion calls.

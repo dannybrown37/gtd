@@ -229,22 +229,25 @@ def _habit_done_this_week(key: str) -> bool:
     return last >= _week_start_iso()
 
 
-def _render_habit_detail(key: str, label: str) -> str:
+def _habit_last_done_str(key: str) -> str:
+    """When it was last completed: 'today', 'Jul 26 (2d ago)' or 'never'."""
     from gtd.storage import get_weekly_habit_date
 
     last = get_weekly_habit_date(key)
-    if last:
-        try:
-            d = datetime.fromisoformat(last)
-            days_ago = (datetime.now().date() - d.date()).days
-            last_str = (
-                'today' if days_ago == 0 else f'{d:%b %-d} ({days_ago}d ago)'
-            )
-        except ValueError:
-            last_str = last
-    else:
-        last_str = 'never'
+    if not last:
+        return 'never'
+    try:
+        d = datetime.fromisoformat(last)
+    except ValueError:
+        return last
+    days_ago = (datetime.now().date() - d.date()).days
+    if days_ago == 0:
+        return 'today'
+    return f'{d:%b %-d} ({days_ago}d ago)'
 
+
+def _render_habit_detail(key: str, label: str) -> str:
+    last_str = _habit_last_done_str(key)
     done = _habit_done_this_week(key)
     if done:
         status = '[green]✓ Done this week[/green]'
@@ -254,7 +257,7 @@ def _render_habit_detail(key: str, label: str) -> str:
     lines = [
         f'[bold red]● {label}[/bold red]'
         if not done
-        else f'[dim]✓ {label}[/dim]',
+        else f'[green]● {label}[/green]',
         '',
         f'{status}   [dim]last: {last_str}[/dim]',
         '',
@@ -266,11 +269,12 @@ def _render_habit_detail(key: str, label: str) -> str:
             _GTD_REVIEW_CHECKLIST,
         ]
 
-    if not done:
-        lines += [
-            '',
-            '[dim]Press W to plan your week and mark done.[/dim]',
-        ]
+    lines += [
+        '',
+        '[dim]Press W to plan your week and mark done.[/dim]'
+        if not done
+        else '[dim]Press W to run through it again.[/dim]',
+    ]
 
     return '\n'.join(lines)
 
@@ -390,17 +394,28 @@ class ListEntryListItem(ListItem):
 
 
 class WeeklyHabitItem(ListItem):
+    """A weekly habit reminder — stays on the list once done, marked green."""
+
     def __init__(self, key: str, label: str) -> None:
         super().__init__()
         self.habit_key = key
         self.habit_label = label
 
-    def compose(self) -> ComposeResult:
-        yield Label(
+    def _label_markup(self) -> str:
+        # Not `_render` — that name is Textual's own Widget internal.
+        if _habit_done_this_week(self.habit_key):
+            note = f'last: {_habit_last_done_str(self.habit_key)}'
+            return f'[green]●[/green] {self.habit_label}  [dim]{note}[/dim]'
+        return (
             f'[bold red]●[/bold red] {self.habit_label}'
-            f'  [dim]not done this week[/dim]',
-            markup=True,
+            f'  [dim]not done this week[/dim]'
         )
+
+    def compose(self) -> ComposeResult:
+        yield Label(self._label_markup(), markup=True)
+
+    def refresh_label(self) -> None:
+        self.query_one(Label).update(self._label_markup())
 
 
 class SeparatorListItem(ListItem):
@@ -1929,8 +1944,6 @@ class TodayContent(BaseEntryContent):
         entries: list[ProjectEntry],
     ) -> None:
         items: list[ListItem] = list(self._habit_items)
-        if self._habit_items and entries:
-            items.append(SeparatorListItem('GTD'))
         items.extend(_context_grouped_items(entries, NextStepListItem))
         await repopulate(lv, items)
 
@@ -1941,9 +1954,7 @@ class TodayContent(BaseEntryContent):
             self.query_one('#entry-loading', LoadingIndicator).display = False
 
         self._habit_items = [
-            WeeklyHabitItem(key, label)
-            for key, label in WEEKLY_HABITS
-            if not _habit_done_this_week(key)
+            WeeklyHabitItem(key, label) for key, label in WEEKLY_HABITS
         ]
 
         await self._rebuild_list()
@@ -1960,8 +1971,9 @@ class TodayContent(BaseEntryContent):
             if self._ctx_filter
             else ''
         )
-        has_content = filtered or self._habit_items
-        if not has_content:
+        # Habit reminders are always listed, so the count and the empty state
+        # both speak only to the GTD entries.
+        if not filtered:
             if self._ctx_filter:
                 header.update(f'Today — empty{ctx_badge}')
                 detail.update(
@@ -1975,7 +1987,7 @@ class TodayContent(BaseEntryContent):
             shown = len(filtered)
             count = f'({shown}/{total})' if self._ctx_filter else f'({total})'
             header.update(f'Today  [dim]{count}[/dim]{ctx_badge}')
-            self._update_detail()
+        self._update_detail()
 
     @on(ListView.Highlighted, '#entry-list')
     def on_list_highlighted(self) -> None:
@@ -2051,7 +2063,7 @@ class TodayContent(BaseEntryContent):
             )
 
         if confirmed:
-            self._dismiss_habit_item(item)
+            self._mark_habit_done(item)
 
     async def _run_weekly_review_flow(self) -> bool:
         loop = asyncio.get_running_loop()
@@ -2073,15 +2085,11 @@ class TodayContent(BaseEntryContent):
             or False
         )
 
-    def _dismiss_habit_item(self, item: WeeklyHabitItem) -> None:
+    def _mark_habit_done(self, item: WeeklyHabitItem) -> None:
         from gtd.storage import set_weekly_habit_date
 
         set_weekly_habit_date(item.habit_key)
-        lv = self.query_one('#entry-list', VimListView)
-        remove_list_item(lv, item)
-        self._habit_items = [
-            h for h in self._habit_items if h.habit_key != item.habit_key
-        ]
+        item.refresh_label()
         self._update_detail()
         self.app.refresh_bindings()
         self.app.notify(f'✓ {item.habit_label} done for this week')

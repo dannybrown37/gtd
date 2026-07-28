@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import httpx
@@ -630,3 +631,109 @@ class TestFilterRebuildHighlight:
                 return [i.highlighted for i in lv.query(ListItem)]
 
         assert asyncio.run(run()) == [True]
+
+
+class TestTodayHabitRow:
+    """The Weekly Review row is permanent — done or not — and unseparated.
+
+    It used to vanish once complete, and a `── GTD ──` separator divided it
+    from the entries. Now it stays put, flipping from a red bullet to a green
+    one that reports when the review last happened.
+    """
+
+    def _today_rows(
+        self,
+        last_done: str | None,
+        entries: list[ProjectEntry] | None = None,
+    ) -> list[str]:
+        async def run() -> list[str]:
+            content = TodayContent()
+            app = _TabHost(content)
+            with (
+                patch.object(TodayContent, '_load_entries'),
+                patch.object(TodayContent, '_load_notes'),
+                patch(
+                    'gtd.storage.get_weekly_habit_date',
+                    return_value=last_done,
+                ),
+            ):
+                async with app.run_test() as pilot:
+                    await content._set_entries(list(entries or []))  # noqa: SLF001
+                    await pilot.pause()
+                    lv = content.query_one('#entry-list', VimListView)
+                    return [
+                        str(i.query_one(Label).content)
+                        for i in lv.query(ListItem)
+                    ]
+
+        return asyncio.run(run())
+
+    def test_pending_review_shows_red_bullet(self):
+        rows = self._today_rows(None)
+        assert rows[0].startswith('[bold red]●[/bold red] Weekly Review')
+        assert 'not done this week' in rows[0]
+
+    def test_completed_review_stays_listed_in_green(self):
+        today = datetime.now().date().isoformat()
+        rows = self._today_rows(today)
+        assert len(rows) == 1
+        assert rows[0].startswith('[green]●[/green] Weekly Review')
+        assert 'last: today' in rows[0]
+
+    def test_completed_review_reports_the_date(self):
+        # Monday of this week, so it counts as done but isn't today.
+        monday = datetime.now().date() - timedelta(
+            days=datetime.now().date().weekday()
+        )
+        rows = self._today_rows(monday.isoformat())
+        days_ago = (datetime.now().date() - monday).days
+        expected = 'today' if days_ago == 0 else f'{monday:%b %-d}'
+        assert '[green]●[/green]' in rows[0]
+        assert f'last: {expected}' in rows[0]
+
+    def test_no_gtd_separator_between_habit_and_entries(self):
+        rows = self._today_rows(
+            None,
+            [_entry(page_id='a', header='Alpha', context='Home')],
+        )
+        assert not any('GTD' in row for row in rows)
+        # habit, context separator, entry — no divider before the context.
+        assert len(rows) == 3
+        assert 'Weekly Review' in rows[0]
+        assert 'Home' in rows[1]
+
+    def test_marking_done_flips_the_row_in_place(self):
+        async def run() -> tuple[int, str]:
+            content = TodayContent()
+            app = _TabHost(content)
+            done: list[str] = []
+            with (
+                patch.object(TodayContent, '_load_entries'),
+                patch.object(TodayContent, '_load_notes'),
+                patch(
+                    'gtd.storage.get_weekly_habit_date',
+                    side_effect=lambda _k: done[0] if done else None,
+                ),
+                patch(
+                    'gtd.storage.set_weekly_habit_date',
+                    side_effect=lambda _k: done.append(
+                        datetime.now().date().isoformat()
+                    ),
+                ),
+            ):
+                async with app.run_test() as pilot:
+                    await content._set_entries([])  # noqa: SLF001
+                    await pilot.pause()
+                    lv = content.query_one('#entry-list', VimListView)
+                    item = lv.children[0]
+                    content._mark_habit_done(item)  # noqa: SLF001
+                    await pilot.pause()
+                    return (
+                        len(lv.query(ListItem)),
+                        str(lv.children[0].query_one(Label).content),
+                    )
+
+        count, row = asyncio.run(run())
+        assert count == 1  # the row stays on the list
+        assert row.startswith('[green]●[/green] Weekly Review')
+        assert 'last: today' in row
