@@ -178,6 +178,7 @@ src/gtd/
     ├── today.py    # Today view and snooze commands.
     └── triage.py   # Interactive triage flow for processing inbox items.
 scripts/
-└── update_readme.py # Update README.md menu, CLI, tree, and HTTP API sections from source.
+├── check_commit_msg_early.py # Validate the commit message during the *pre-commit* stage, not commit-msg.
+└── update_readme.py          # Update README.md menu, CLI, tree, and HTTP API sections from source.
 ```
 <!-- END TREE -->

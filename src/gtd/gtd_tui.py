@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import os
 import random
+import re
 import subprocess
 import tempfile
 from datetime import datetime, timedelta
@@ -299,6 +300,37 @@ _CELEBRATION_MESSAGES = [
     'OBLITERATED',
 ]
 
+_STEP_MESSAGES = [
+    'STEP CLEARED',
+    'ONE DOWN',
+    'MOMENTUM',
+    'KEEP ROLLING',
+    'CLEAN SWEEP',
+    'LOCKED IN',
+    'THAT IS PROGRESS',
+    'SYSTEM TRUSTED',
+]
+
+_REVIEW_FINALE_FRAMES = [
+    '🧠  💧  🏆  💧  🧠',
+    '💧  🎊  🥳  🎊  💧',
+    '🏆  🎉  🧠  🎉  🏆',
+    '🎊  🥳  💧  🥳  🎊',
+]
+
+_REVIEW_FINALE_MESSAGES = [
+    'WEEKLY REVIEW COMPLETE',
+    'MIND LIKE WATER',
+    'FULLY CURRENT',
+    'EVERY LOOP CLOSED',
+    'NOTHING FALLING THROUGH',
+]
+
+
+def _plain(text: str) -> str:
+    """Strip console markup so a step label can render markup-free."""
+    return re.sub(r'\[/?[^\[\]]*\]', '', text).strip()
+
 
 class CelebrationScreen(ModalScreen):
     DEFAULT_CSS = """
@@ -333,27 +365,35 @@ class CelebrationScreen(ModalScreen):
         Binding('escape,enter,space', 'dismiss_cel', show=False),
     ]
 
-    def __init__(self, header: str) -> None:
+    def __init__(
+        self,
+        header: str,
+        *,
+        messages: list[str] | None = None,
+        frames: list[str] | None = None,
+        duration: float = 2.0,
+        quoted: bool = True,
+    ) -> None:
         super().__init__()
-        self._header = header
+        self._header = f'"{header}"' if quoted else header
+        self._frames = frames or _CELEBRATION_FRAMES
+        self._duration = duration
         self._frame = 0
-        self._msg = random.choice(_CELEBRATION_MESSAGES)
+        self._msg = random.choice(messages or _CELEBRATION_MESSAGES)
 
     def compose(self) -> ComposeResult:
         with Vertical(classes='cel-box'):
             yield Static('', classes='cel-emoji', id='cel-emoji', markup=True)
             yield Static(self._msg, classes='cel-title', markup=False)
-            yield Static(
-                f'"{self._header}"', classes='cel-header', markup=False
-            )
+            yield Static(self._header, classes='cel-header', markup=False)
 
     def on_mount(self) -> None:
         self._tick()
         self.set_interval(0.35, self._tick)
-        self.set_timer(2.0, self.action_dismiss_cel)
+        self.set_timer(self._duration, self.action_dismiss_cel)
 
     def _tick(self) -> None:
-        frame = _CELEBRATION_FRAMES[self._frame % len(_CELEBRATION_FRAMES)]
+        frame = self._frames[self._frame % len(self._frames)]
         self.query_one('#cel-emoji', Static).update(frame)
         self._frame += 1
 
@@ -1204,11 +1244,16 @@ class ProjectsBrowseScreen(ModalScreen):
     ProjectsBrowseScreen .sb-footer-exit { margin-top: 0; }
     """
 
+    # Item keys are capitals, mirroring the main app: lowercase keys are
+    # navigation/global (h/j/k/l/q), so an accidental one never fires an
+    # action here.
     BINDINGS: ClassVar[list[Binding]] = [
         Binding('escape', 'finish_step', 'Finish step', show=True),
-        Binding('u', 'update_entry', 'Update project', show=True),
-        Binding('s', 'someday', 'Someday', show=True),
-        Binding('e', 'edit_steps', 'Edit Steps', show=True),
+        Binding('q', 'finish_step', show=False),
+        Binding('U', 'update_entry', 'Update project', show=True),
+        Binding('S', 'someday', 'Someday', show=True),
+        Binding('E', 'edit_steps', 'Edit Steps', show=True),
+        Binding('D', 'drop', 'Drop project', show=True),
         Binding('j', 'cursor_down', show=False),
         Binding('k', 'cursor_up', show=False),
     ]
@@ -1217,6 +1262,7 @@ class ProjectsBrowseScreen(ModalScreen):
         super().__init__()
         self._entries = list(entries)
         self._to_someday: list[ProjectEntry] = []
+        self._to_drop: list[ProjectEntry] = []
         self._step_updates: dict[str, str] = {}
 
     def compose(self) -> ComposeResult:
@@ -1232,8 +1278,8 @@ class ProjectsBrowseScreen(ModalScreen):
             # Item actions and the step exit are labelled by what they act
             # on — both used to just say "done".
             yield Static(
-                '[dim]this item —[/dim] u: update project  ·  '
-                's: → someday  ·  e: edit steps',
+                '[dim]this item —[/dim] U: update project  ·  '
+                'S: → someday  ·  E: edit steps  ·  D: drop',
                 classes='sb-footer',
                 markup=True,
             )
@@ -1274,7 +1320,10 @@ class ProjectsBrowseScreen(ModalScreen):
             f'Current Projects  [dim]({n} item{s})[/dim]'
         )
         if not self._entries:
-            self.dismiss((self._to_someday, self._step_updates))
+            self.dismiss(self._result())
+
+    def _result(self) -> tuple[list, dict, list]:
+        return (self._to_someday, self._step_updates, self._to_drop)
 
     @work
     async def action_update_entry(self) -> None:
@@ -1293,6 +1342,18 @@ class ProjectsBrowseScreen(ModalScreen):
             self._remove_current()
 
     @work
+    async def action_drop(self) -> None:
+        entry = self._current_entry()
+        if not entry:
+            return
+        confirmed = await self.app.push_screen_wait(
+            ConfirmModal(f'Drop "{entry.header.strip()}"?')
+        )
+        if confirmed:
+            self._to_drop.append(entry)
+            self._remove_current()
+
+    @work
     async def action_edit_steps(self) -> None:
         entry = self._current_entry()
         if not entry:
@@ -1305,7 +1366,7 @@ class ProjectsBrowseScreen(ModalScreen):
             self.app.notify(f'Steps updated: {entry.header.strip()[:40]}')
 
     def action_finish_step(self) -> None:
-        self.dismiss((self._to_someday, self._step_updates))
+        self.dismiss(self._result())
 
     def action_cursor_down(self) -> None:
         self.query_one('#sb-list', VimListView).action_cursor_down()
@@ -1317,6 +1378,7 @@ class ProjectsBrowseScreen(ModalScreen):
 async def _review_projects(app: App) -> int:
     """Browse Current Projects. Returns count."""
     from gtd.notion.client import (
+        archive_page,
         build_property_update,
         query_database,
         update_page,
@@ -1341,7 +1403,7 @@ async def _review_projects(app: App) -> int:
     if not result:
         return len(entries)
 
-    to_someday, step_updates = result
+    to_someday, step_updates, to_drop = result
     for entry in to_someday:
         await loop.run_in_executor(
             None,
@@ -1349,6 +1411,8 @@ async def _review_projects(app: App) -> int:
             entry.page_id,
             build_property_update(status='Someday/Maybe'),
         )
+    for entry in to_drop:
+        await loop.run_in_executor(None, archive_page, entry.page_id)
     for page_id, steps in step_updates.items():
         await loop.run_in_executor(
             None,
@@ -1383,8 +1447,9 @@ class WaitingForBrowseScreen(ModalScreen):
 
     BINDINGS: ClassVar[list[Binding]] = [
         Binding('escape', 'finish_step', 'Finish step', show=True),
-        Binding('u', 'update_entry', 'Update project', show=True),
-        Binding('s', 'change_status', 'Change Status', show=True),
+        Binding('q', 'finish_step', show=False),
+        Binding('U', 'update_entry', 'Update project', show=True),
+        Binding('S', 'change_status', 'Change Status', show=True),
         Binding('j', 'cursor_down', show=False),
         Binding('k', 'cursor_up', show=False),
     ]
@@ -1405,8 +1470,8 @@ class WaitingForBrowseScreen(ModalScreen):
             )
             yield VimListView(id='sb-list')
             yield Static(
-                '[dim]this item —[/dim] u: update project  ·  '
-                's: change status',
+                '[dim]this item —[/dim] U: update project  ·  '
+                'S: change status',
                 classes='sb-footer',
                 markup=True,
             )
@@ -1589,8 +1654,9 @@ class SomedayBrowseScreen(ModalScreen):
 
     BINDINGS: ClassVar[list[Binding]] = [
         Binding('escape', 'finish_step', 'Finish step', show=True),
-        Binding('a', 'activate', 'Activate', show=True),
-        Binding('d', 'drop', 'Drop item', show=True),
+        Binding('q', 'finish_step', show=False),
+        Binding('A', 'activate', 'Activate', show=True),
+        Binding('D', 'drop', 'Drop item', show=True),
         Binding('j', 'cursor_down', show=False),
         Binding('k', 'cursor_up', show=False),
     ]
@@ -1612,7 +1678,7 @@ class SomedayBrowseScreen(ModalScreen):
             )
             yield VimListView(id='sb-list')
             yield Static(
-                '[dim]this item —[/dim] a: activate  ·  d: drop',
+                '[dim]this item —[/dim] A: activate  ·  D: drop',
                 classes='sb-footer',
                 markup=True,
             )
@@ -1765,6 +1831,9 @@ class WeeklyReviewScreen(ModalScreen[bool]):
 
     BINDINGS: ClassVar[list[Binding]] = [
         Binding('escape', 'cancel', 'Close review'),
+        # q mirrors escape here rather than quitting the app — muscle memory
+        # from the main app used to kill the whole session mid-review.
+        Binding('q', 'cancel', show=False),
         Binding('enter,space', 'toggle', 'Check/Launch', show=True),
         Binding('X', 'reset', 'Reset', show=True),
         Binding('j', 'cursor_down', show=False),
@@ -1829,7 +1898,7 @@ class WeeklyReviewScreen(ModalScreen[bool]):
                 )
             yield Static(
                 '[dim]j/k · space: launch step · X: reset · '
-                'esc: close (progress saved)[/dim]',
+                'esc/q: close (progress saved)[/dim]',
                 classes='review-footer',
             )
 
@@ -1899,6 +1968,30 @@ class WeeklyReviewScreen(ModalScreen[bool]):
                 )
         return True
 
+    async def _celebrate_step(self, step: dict) -> None:
+        """Hype the user up: fanfare per step, a bigger one for the finale."""
+        total = len(self._steps)
+        done = sum(1 for s in self._steps if s['done'])
+        if done == total:
+            await self.app.push_screen_wait(
+                CelebrationScreen(
+                    f'{total}/{total} steps · see you next week',
+                    messages=_REVIEW_FINALE_MESSAGES,
+                    frames=_REVIEW_FINALE_FRAMES,
+                    duration=3.0,
+                    quoted=False,
+                )
+            )
+            return
+        await self.app.push_screen_wait(
+            CelebrationScreen(
+                f'{_plain(step["label"])}  ·  {done}/{total} steps',
+                messages=_STEP_MESSAGES,
+                duration=1.5,
+                quoted=False,
+            )
+        )
+
     @work
     async def action_toggle(self) -> None:
         step = self._steps[self._focused]
@@ -1914,6 +2007,8 @@ class WeeklyReviewScreen(ModalScreen[bool]):
             self._save_state()
             self._advance()
         self._refresh_steps()
+        if completed:
+            await self._celebrate_step(step)
         if all(s['done'] for s in self._steps):
             self.dismiss(result=True)
 
@@ -3895,16 +3990,21 @@ class GTDApp(App[None]):
     BINDINGS: ClassVar[list[Binding]] = [
         Binding('ctrl+p', 'command_palette', show=False),
         Binding('/', 'command_palette', 'Search', show=True),
-        Binding('h', 'tab_left', '←', priority=True),
+        # Nothing here is priority: Textual checks priority bindings from the
+        # App down *through* modals, so a priority key fires even while a
+        # modal (weekly review, confirm prompt…) is open. `q` quitting the app
+        # mid-review was the painful one. Without priority these still resolve
+        # normally on the main screen and stay out of modals' way.
+        Binding('h', 'tab_left', '←'),
         Binding('j', 'focus_list', '↓', priority=False),
         Binding('k', 'focus_list_up', '↑', priority=False),
         Binding('G', 'focus_list_bottom', show=False, priority=False),
-        Binding('l', 'tab_right', '→', priority=True),
+        Binding('l', 'tab_right', '→'),
         Binding('tab', 'tab_right', 'Switch Pane', priority=False),
         Binding('down', 'focus_list', show=False),
         Binding('C', 'capture', 'Capture'),
         Binding('R', 'refresh', 'Refresh'),
-        Binding('q', 'quit', 'Quit', priority=True),
+        Binding('q', 'quit', 'Quit'),
         Binding('escape', 'quit', show=False),
     ]
 

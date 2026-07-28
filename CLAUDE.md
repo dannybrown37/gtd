@@ -64,13 +64,17 @@ The Today header count and its "nothing actionable 🎉" empty state describe th
 ### Waiting For tab (Weekly Review)
 
 `WaitingForBrowseScreen` — browse Waiting For items during the Weekly Review step. Actions:
-- **`d`** → Complete project — confirms then archives the page
-- **`s`** → Change Status — `SelectModal` with all statuses except "Waiting For"; updates Notion on dismiss
-- **`esc`** → `action_finish_step` — finishes the review step
+- **`U`** → Update project — prompts for a field, updates Notion
+- **`S`** → Change Status — `SelectModal` with all statuses except "Waiting For"; updates Notion on dismiss
+- **`esc`** / **`q`** → `action_finish_step` — finishes the review step
+
+**Review keys are capitals** — every per-item key on the three browse screens is an uppercase letter (`U`/`S`/`E`/`D`/`A`), mirroring the main app, so lowercase navigation/global keys (`h j k l q`) can never fire a destructive action by accident. `q` is bound to `finish_step` on the browse screens and `cancel` on `WeeklyReviewScreen` — it used to quit the entire app mid-review (see the priority-binding note under Textual Conventions). `TestReviewKeysAreDeliberate` enforces both.
 
 **Key-scope labelling (all three browse screens)** — `ProjectsBrowseScreen`, `WaitingForBrowseScreen` and `SomedayBrowseScreen` each have keys at two different scopes, and both used to be described as "Done", which made them indistinguishable. The escape action is named `finish_step` (never `done`), and each screen's footer is two lines: `this item — ...` for the per-entry keys, `this step — esc: done reviewing <thing>` for the exit. Keep new bindings on the right line, and don't reuse a description across two visible bindings — `TestReviewStepScoping` enforces this.
 
 Changes are collected (`_to_done: list`, `_status_changes: dict[str, str]`) and applied in `_review_waiting_for` after dismissal.
+
+`ProjectsBrowseScreen` collects three things — `_to_someday`, `_step_updates`, `_to_drop` (the `D` key, confirm-then-archive) — dismissed as a 3-tuple via `_result()` and applied in `_review_projects`.
 
 ### Other tabs
 
@@ -85,7 +89,14 @@ Each area loops until explicitly marked "All good". The prompt repeats for the s
 
 ## CelebrationScreen
 
-`CelebrationScreen(header)` — shown after `action_mark_done` confirms. Cycling emoji animation (4 frames, 0.35s interval), random hype message, auto-dismisses after 2s. Any key skips it. Located in `gtd_tui.py` near the top with `_CELEBRATION_FRAMES` and `_CELEBRATION_MESSAGES` constants.
+`CelebrationScreen(header, *, messages, frames, duration, quoted)` — cycling emoji animation (0.35s interval), a random hype message, auto-dismisses after `duration`. Any key skips it. Located in `gtd_tui.py` near the top with the `_CELEBRATION_*`, `_STEP_MESSAGES` and `_REVIEW_FINALE_*` constants.
+
+Three callers, each with its own message pool:
+- `action_mark_done` — defaults (`_CELEBRATION_MESSAGES`, 2s, header quoted)
+- every completed Weekly Review step — `_STEP_MESSAGES`, 1.5s, header is `<step label>  ·  n/total steps`
+- the last review step — `_REVIEW_FINALE_MESSAGES` + `_REVIEW_FINALE_FRAMES`, 3s; replaces the per-step fanfare rather than stacking on it
+
+`WeeklyReviewScreen._celebrate_step` picks between the last two by counting done steps. Step labels carry console markup (`[dim](3 items)[/dim]`), so it runs them through `_plain()` — the celebration Statics are `markup=False`.
 
 ## SelectModal UX
 
@@ -93,7 +104,7 @@ Two-mode design: opens in **browse mode** (ListView focused, j/k navigate). **Ta
 
 ## SomedayBrowseScreen
 
-`ModalScreen` used during Weekly Review step 4 (Review Someday/Maybe). Shows a scrollable list of Someday items — scroll with j/k, optionally **a** to activate or **d** to drop any item. No forced per-item decision; user browses at will and dismisses when done.
+`ModalScreen` used during Weekly Review step 4 (Review Someday/Maybe). Shows a scrollable list of Someday items — scroll with j/k, optionally **A** to activate or **D** to drop any item. No forced per-item decision; user browses at will and dismisses when done.
 
 ## Data Stores
 
@@ -136,6 +147,7 @@ Two-mode design: opens in **browse mode** (ListView focused, j/k navigate). **Ta
 - **Removing list items** — always use `remove_list_item(lv, item)` (`tui.py`), never bare `item.remove()`. `ListItem.remove()` leaves `ListView.index` alone, so removing the highlighted item leaves the index on whatever slides into its place without ever highlighting it — the list looks unhighlighted while actions still operate on it. Most visible with one item left, where j/k can't re-fire the watcher. The helper mirrors `ListView.pop`'s index fixup and skips separators.
 - Modals: `InputModal`, `SelectModal`, `ConfirmModal`, `TwoFieldModal`, `SomedayBrowseScreen` — all `ModalScreen`
 - `ENABLE_COMMAND_PALETTE = False` on `GTDApp`
+- **Never use `priority=True` on `GTDApp.BINDINGS`** — Textual checks priority bindings from the App *down through* modals (`App._check_bindings` walks `reversed(screen._binding_chain)`, which includes the app even when a `ModalScreen` is open). `q`/`h`/`l` were priority, so `q` quit the whole app from inside the weekly review and `h`/`l` switched tabs behind open modals. Without priority they still resolve fine on the main screen (the non-priority pass walks the chain up to the app) and stay out of modals' way; `TestQuitIsNotPriority` guards both directions.
 - Use `@work` for ALL async actions that call `push_screen_wait` — required in both standalone and embedded contexts. `@work(thread=True)` for blocking Notion calls.
 - **Never `await` a `@work`-decorated method** — it returns a `Worker` object. Extract core logic into a plain `async def` and have both `@work` action and other callers use that.
 - Always call `self.app.refresh_bindings()` after selection changes that affect `check_action`

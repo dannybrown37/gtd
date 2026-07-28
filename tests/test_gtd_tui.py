@@ -1,5 +1,6 @@
 import asyncio
 from datetime import datetime, timedelta
+from typing import ClassVar
 from unittest.mock import MagicMock, patch
 
 import httpx
@@ -797,6 +798,214 @@ class TestReviewStepScoping:
         assert any('this step' in f for f in footers)
 
 
+@pytest.mark.parametrize(
+    'screen_cls', _BROWSE_SCREENS, ids=lambda c: c.__name__
+)
+class TestReviewKeysAreDeliberate:
+    """Review keys mirror the main app: capitals act, lowercase navigates.
+
+    `q` used to be an app-level *priority* binding, so it quit the whole app
+    even from inside a review modal — one stray keystroke mid-review.
+    """
+
+    def test_item_keys_are_capitals(self, screen_cls):
+        item_keys = [
+            b.key
+            for b in screen_cls.BINDINGS
+            if b.show and b.key not in {'escape', 'enter', 'space'}
+        ]
+        assert item_keys
+        assert all(k.isupper() and len(k) == 1 for k in item_keys)
+
+    def test_q_finishes_the_step_instead_of_quitting(self, screen_cls):
+        q = next(b for b in screen_cls.BINDINGS if b.key == 'q')
+        assert q.action == 'finish_step'
+
+
+class TestQuitIsNotPriority:
+    """No app binding may be priority — priority fires straight through modals.
+
+    Textual checks priority bindings from the App down regardless of which
+    modal is open, so `q` quit the app mid weekly review.
+    """
+
+    def test_no_app_binding_is_priority(self):
+        assert [b.key for b in GTDApp.BINDINGS if b.priority] == []
+
+    class _AppHost(App):
+        """Stand-in for GTDApp: same keys, no Notion."""
+
+        BINDINGS: ClassVar[list[Binding]] = list(GTDApp.BINDINGS)
+        quits: ClassVar[list[bool]] = []
+
+        def compose(self) -> ComposeResult:
+            yield VimListView(ListItem(Label('Alpha')), id='host-list')
+
+        def action_quit(self) -> None:  # type: ignore[override]
+            type(self).quits.append(True)
+
+    def test_q_still_quits_from_the_main_screen(self):
+        """Dropping `priority` must not cost `q` its day job."""
+
+        async def run() -> list[bool]:
+            app = self._AppHost()
+            type(app).quits = []
+
+            async with app.run_test(size=(100, 24)) as pilot:
+                app.query_one('#host-list', VimListView).focus()
+                await pilot.press('q')
+                for _ in range(3):
+                    await pilot.pause()
+                return type(app).quits
+
+        assert asyncio.run(run()) == [True]
+
+    def test_q_in_a_review_screen_does_not_quit(self):
+        quits: list[bool] = []
+        self._AppHost.quits = quits
+
+        async def run() -> str:
+            app = self._AppHost()
+            async with app.run_test(size=(100, 24)) as pilot:
+                await _push(
+                    app,
+                    ProjectsBrowseScreen([_entry(page_id='a')]),
+                    pilot,
+                )
+                await pilot.press('q')
+                for _ in range(3):
+                    await pilot.pause()
+                return type(app.screen).__name__
+
+        screen_name = asyncio.run(run())
+        assert quits == []  # the app survives
+        assert screen_name != 'ProjectsBrowseScreen'  # …and q closed the step
+
+
+class TestProjectsDrop:
+    """`D: drop` is back on the Projects review step."""
+
+    def test_drop_collects_the_entry_and_removes_the_row(self):
+        entries = [
+            _entry(page_id='a', header='Alpha'),
+            _entry(page_id='b', header='Bravo'),
+        ]
+
+        async def run() -> tuple[list[str], int, tuple]:
+            app = _BrowseHost()
+            async with app.run_test(size=(100, 24)) as pilot:
+                screen = await _push(app, ProjectsBrowseScreen(entries), pilot)
+                screen.action_drop()
+                for _ in range(4):
+                    await pilot.pause()
+                await pilot.press('y')
+                for _ in range(4):
+                    await pilot.pause()
+                lv = screen.query_one('#sb-list', VimListView)
+                return (
+                    [e.page_id for e in screen._to_drop],  # noqa: SLF001
+                    len(lv.query(ListItem)),
+                    screen._result(),  # noqa: SLF001
+                )
+
+        dropped, rows, result = asyncio.run(run())
+        assert dropped == ['a']
+        assert rows == 1
+        assert result[2] == [entries[0]]  # third slot carries the drops
+
+    def test_review_projects_archives_dropped_pages(self):
+        entries = [_entry(page_id='a', header='Alpha')]
+        archived: list[str] = []
+
+        async def run() -> None:
+            app = _BrowseHost()
+            with (
+                patch(
+                    'gtd.notion.client.query_database',
+                    return_value=[MagicMock()],
+                ),
+                patch(
+                    'gtd.gtd_tui.ProjectEntry.from_page',
+                    side_effect=lambda _p: entries[0],
+                ),
+                patch(
+                    'gtd.notion.client.archive_page',
+                    side_effect=archived.append,
+                ),
+                patch('gtd.notion.client.update_page'),
+                patch('gtd.notion.client.build_property_update'),
+            ):
+                async with app.run_test(size=(100, 24)) as pilot:
+                    # a worker, not a bare task: push_screen_wait needs one
+                    worker = app.run_worker(
+                        gtd.gtd_tui._review_projects(app)  # noqa: SLF001
+                    )
+                    for _ in range(6):
+                        await pilot.pause()
+                    screen = app.screen
+                    screen._to_drop.append(entries[0])  # noqa: SLF001
+                    screen.action_finish_step()
+                    for _ in range(6):
+                        await pilot.pause()
+                    await worker.wait()
+
+        asyncio.run(run())
+        assert archived == ['a']
+
+
+class TestStepFanfare:
+    """Every completed review step gets a celebration; the last gets more."""
+
+    def _toggle_and_capture(self, done_before: list[int]) -> tuple[str, str]:
+        from gtd.gtd_tui import CelebrationScreen, WeeklyReviewScreen
+
+        async def run() -> tuple[str, str]:
+            app = _BrowseHost()
+            with (
+                patch('gtd.storage.load_review_state', return_value=[]),
+                patch('gtd.storage.save_review_state'),
+            ):
+                async with app.run_test(size=(100, 30)) as pilot:
+                    screen = WeeklyReviewScreen([], 0)
+
+                    async def _run_step(_step) -> bool:
+                        return True
+
+                    screen._run_step = _run_step  # noqa: SLF001
+                    await _push(app, screen, pilot)
+                    for i, step in enumerate(screen._steps):  # noqa: SLF001
+                        step['done'] = i in done_before
+                    screen._focus_step(  # noqa: SLF001
+                        next(
+                            i
+                            for i, s in enumerate(screen._steps)  # noqa: SLF001
+                            if not s['done']
+                        )
+                    )
+                    screen.action_toggle()
+                    for _ in range(6):
+                        await pilot.pause()
+                    cel = app.screen
+                    assert isinstance(cel, CelebrationScreen)
+                    return type(cel).__name__, cel._msg  # noqa: SLF001
+
+        return asyncio.run(run())
+
+    def test_a_finished_step_celebrates(self):
+        from gtd.gtd_tui import _STEP_MESSAGES
+
+        name, msg = self._toggle_and_capture(done_before=[0])
+        assert name == 'CelebrationScreen'
+        assert msg in _STEP_MESSAGES
+
+    def test_the_last_step_gets_the_finale(self):
+        from gtd.gtd_tui import _REVIEW_FINALE_MESSAGES, _GTD_REVIEW_STEPS
+
+        all_but_last = list(range(len(_GTD_REVIEW_STEPS) - 1))
+        _, msg = self._toggle_and_capture(done_before=all_but_last)
+        assert msg in _REVIEW_FINALE_MESSAGES
+
+
 class _BrowseHost(App):
     def compose(self) -> ComposeResult:
         yield Static('')
@@ -848,9 +1057,10 @@ _UPDATE_SCREENS = [ProjectsBrowseScreen, WaitingForBrowseScreen]
 
 
 class TestBrowseUpdateAction:
-    """`u: update project` replaced `d: complete project`.
+    """`U: update project` replaced `d: complete project`.
 
-    Nothing on the review screens should archive a page any more.
+    Completing a project is not a review action — `D: drop` (Projects only)
+    is, and it is deliberately worded as a drop, not a completion.
     """
 
     @pytest.mark.parametrize(
