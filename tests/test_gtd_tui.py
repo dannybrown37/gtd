@@ -28,6 +28,7 @@ from gtd.gtd_tui import (
     ProjectsBrowseScreen,
     SeparatorListItem,
     SomedayBrowseScreen,
+    SomedayContent,
     TodayContent,
     WaitingForBrowseScreen,
     _classify_network_error,
@@ -528,6 +529,7 @@ class TestTabBarBottomJump:
                 patch.object(BaseEntryContent, '_load_notes'),
                 patch.object(TodayContent, '_load_entries'),
                 patch.object(ListsContent, '_load_notion_categories'),
+                patch.object(SomedayContent, '_load_notion_areas'),
             ):
                 app = GTDApp()
                 async with app.run_test() as pilot:
