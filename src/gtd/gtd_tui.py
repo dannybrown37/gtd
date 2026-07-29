@@ -3209,9 +3209,16 @@ class NextStepsContent(BaseEntryContent):
         self._ctx_filter: str | None = None
 
     def _build_filter(self) -> dict:
+        from gtd.notion.entries import _recurring_due_clauses
+
         return {
-            'property': 'Status',
-            'select': {'equals': 'Current Project'},
+            'or': [
+                {
+                    'property': 'Status',
+                    'select': {'equals': 'Current Project'},
+                },
+                *_recurring_due_clauses(),
+            ],
         }
 
     def _filtered_entries(self) -> list[ProjectEntry]:

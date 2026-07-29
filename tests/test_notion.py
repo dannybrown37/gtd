@@ -116,13 +116,14 @@ def _make_page(
     context: str = 'Work',
     next_step: str = 'Do it',
     success_condition: str = 'Done',
+    status: str = 'Current Project',
 ) -> dict:
     return {
         'id': 'page-1',
         'created_time': '2026-06-01T00:00:00Z',
         'properties': {
             'Header': {'title': [{'plain_text': header}]},
-            'Status': {'select': {'name': 'Current Project'}},
+            'Status': {'select': {'name': status}},
             'Context': {
                 'select': {'name': context} if context else None,
             },
@@ -154,6 +155,27 @@ class TestGetTodayEntries:
         results = _get_today_entries()
         assert len(results) == 1
         assert results[0].header == 'Complete'
+
+    @patch('gtd.notion.entries.query_database')
+    def test_recurring_items_shown_without_context_or_step(self, mock_db):
+        """Recurring items surface even without context/next_step set.
+
+        Unlike Current Project entries, a recurring item's header alone
+        describes the task -- it shouldn't need a Next Actionable Step
+        or Context to show up in Today.
+        """
+        mock_db.return_value = [
+            _make_page(
+                header='Daily: Take out trash',
+                context='',
+                next_step='',
+                status='Recurring',
+            ),
+            _make_page(header='No context', context='', next_step='Go'),
+        ]
+        results = _get_today_entries()
+        assert len(results) == 1
+        assert results[0].header == 'Daily: Take out trash'
 
 
 # --- Triage catches items that would be invisible in Today ---

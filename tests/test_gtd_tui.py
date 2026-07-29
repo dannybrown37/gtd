@@ -582,6 +582,40 @@ class _TabHost(App):
         yield self._content
 
 
+class TestNextStepsBuildFilter:
+    """Next Steps must surface due Recurring items too.
+
+    Not just Current Project — a recurring task is just as actionable
+    once its follow-up date arrives.
+    """
+
+    def test_requests_current_project_and_active_recurring(self):
+        clauses = NextStepsContent()._build_filter()['or']  # noqa: SLF001
+
+        assert {
+            'property': 'Status',
+            'select': {'equals': 'Current Project'},
+        } in clauses
+        assert any(
+            c.get('and', [{}])[0]
+            == {'property': 'Status', 'select': {'equals': 'Recurring'}}
+            for c in clauses
+        )
+
+    def test_stays_within_notions_two_level_filter_nesting(self):
+        """Notion rejects filters nested more than two levels (400).
+
+        `or` -> `and` -> `or` is three levels and was previously sent as
+        one clause; it must come back flattened to `or` -> `and` -> leaf.
+        """
+        clauses = NextStepsContent()._build_filter()['or']  # noqa: SLF001
+
+        for clause in clauses:
+            for sub in clause.get('and', []):
+                assert 'or' not in sub
+                assert 'and' not in sub
+
+
 class TestFilterRebuildHighlight:
     """The user-facing trigger: rebuilding an already-populated list.
 
