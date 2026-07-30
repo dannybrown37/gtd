@@ -7,8 +7,10 @@ A TUI/CLI/API for personal productivity built around [GTD (Getting Things Done)]
 - Capture items to an inbox and triage them into projects
 - Track projects with contexts, next actions, and follow-up dates
 - Log completions and auto-reschedule recurring items
-- Defer, snooze, and review Someday/Maybe lists
+- Defer, snooze, and review Someday/Maybe lists, grouped by Area of Focus
 - Filter by context for focused work sessions
+- Organize reference lists (books, restaurants, etc.) by List Category
+- Manage Areas of Focus and List Categories directly from the TUI or CLI
 
 ## Screenshots
 
@@ -209,8 +211,8 @@ sections shouldn't drift in practice.
 
 ## Data storage
 
-- **GTD**: Notion database (configured via `gtd init` or `NOTION_NOTES_TOKEN` / `NOTION_PROJECTS_DB_ID` env vars)
-- **Weekly review state, Areas of Focus, list categories**: JSON files in `~/.local/share/gtd/`
+- **GTD projects/inbox, Areas of Focus, List Categories**: Notion database (configured via `gtd init` or `NOTION_NOTES_TOKEN` / `NOTION_PROJECTS_DB_ID` env vars) — Areas and List Categories are select-field options on that database, managed via `gtd areas`/the Someday tab and the Lists tab respectively, not separate files
+- **Weekly review state**: JSON file in `~/.local/share/gtd/`
 
 ## Project structure
 
