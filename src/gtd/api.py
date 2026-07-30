@@ -121,6 +121,20 @@ def _get_page_by_id(page_id: str) -> dict | None:
 # region Triage Helpers
 
 
+def _current_project_or_recurring_query() -> dict:
+    """Return query for Current Project or Recurring entries."""
+    return {
+        'property': 'Status',
+        'or': [
+            {
+                'property': 'Status',
+                'select': {'equals': 'Current Project'},
+            },
+            {'property': 'Status', 'select': {'equals': 'Recurring'}},
+        ],
+    }
+
+
 def _validate_triage_status(status: str) -> tuple[dict, int] | None:
     """Validate status value. Returns error tuple if invalid, None if valid."""
     if status not in TRIAGE_STATUSES:
@@ -298,12 +312,7 @@ def contexts() -> Any:
     friday = 4
 
     today_str = _get_timezone_iso_date()
-    pages = query_database(
-        filter_obj={
-            'property': 'Status',
-            'select': {'equals': 'Current Project'},
-        },
-    )
+    pages = query_database(filter_obj=_current_project_or_recurring_query())
     entries = [ProjectEntry.from_page(p) for p in pages]
     active_contexts = {
         e.context
@@ -338,17 +347,7 @@ def contexts() -> Any:
 def next_steps() -> Any:
     """Get actionable next steps, optionally filtered by context."""
     today_str = _get_timezone_iso_date()
-    pages = query_database(
-        filter_obj={
-            'or': [
-                {
-                    'property': 'Status',
-                    'select': {'equals': 'Current Project'},
-                },
-                {'property': 'Status', 'select': {'equals': 'Recurring'}},
-            ],
-        },
-    )
+    pages = query_database(filter_obj=_current_project_or_recurring_query())
     entries = [ProjectEntry.from_page(p) for p in pages]
     entries = [
         e
