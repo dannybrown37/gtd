@@ -54,18 +54,38 @@ A TUI/CLI/API for personal productivity built around [GTD (Getting Things Done)]
 ## Requirements
 
 - Python 3.12+
-- [fzf](https://github.com/junegunn/fzf) (for interactive menus)
+- [uv](https://docs.astral.sh/uv/) (for installation)
 - A [Notion integration token](https://developers.notion.com/) (for `gtd`)
+
+[fzf](https://github.com/junegunn/fzf) powers the interactive menus (legacy
+`gtd fzf` menu and several CLI prompts), but you don't need to install it
+separately — [`iterfzf`](https://pypi.org/project/iterfzf/) ships a bundled
+fzf binary as a dependency. If you already have your own `fzf` on `PATH`,
+that one is used instead (so your existing config/theme/version wins).
 
 ## Installation
 
+### From PyPI (recommended)
+
 ```bash
-cd gtd
-uv sync
-uv pip install -e .
+uv tool install gtd-tui
 ```
 
-This installs the `gtd` command.
+This installs the `gtd` command as an isolated tool, with fzf bundled in —
+no extra setup needed. Upgrade with `uv tool upgrade gtd-tui`.
+
+### From source
+
+For local development, or to run an unreleased version:
+
+```bash
+git clone https://github.com/dannybrown37/gtd.git
+cd gtd
+uv tool install -e .
+```
+
+The `-e` flag installs in editable mode, so code changes take effect after
+re-running the command (no reinstall needed unless dependencies change).
 
 ## Usage
 
@@ -111,7 +131,7 @@ without opening the TUI:
 | `gtd config notes-editor` | Set notes editor: inline (TUI TextArea) or external (uses $EDITOR). |
 | `gtd fzf` | Launch the legacy fzf-based interactive GTD menu. |
 | `gtd tui` | Launch the interactive GTD TUI. |
-| `gtd api` | Start the GTD HTTP API server (requires: pip install gtd[api]). |
+| `gtd api` | Start the GTD HTTP API server (requires: gtd-tui[api]). |
 <!-- END CLI -->
 
 ### Legacy fzf menu
@@ -153,7 +173,7 @@ Notion integration and database. Your GTD data lives in your Notion account unde
 your own token.
 
 
-**Install**: `uv pip install "gtd[api]"`
+**Install**: `uv tool install "gtd-tui[api]"`
 **Run**: `gtd api` (default `0.0.0.0:8000`) or `gtd api --port 9000`
 **Auth**: Bearer token — set `GTD_API_KEY` on the server, then pass
 `Authorization: Bearer <key>` on every request.

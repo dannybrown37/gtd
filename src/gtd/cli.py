@@ -487,12 +487,13 @@ def tui() -> None:
 @click.option('--port', default=8000, show_default=True)
 @click.option('--reload', is_flag=True, help='Auto-reload (dev only)')
 def api(host: str, port: int, reload: bool) -> None:
-    """Start the GTD HTTP API server (requires: pip install gtd[api])."""
+    """Start the GTD HTTP API server (requires: gtd-tui[api])."""
     try:
         import uvicorn
     except ImportError:
         click.echo(
-            'uvicorn not installed. Run: uv pip install "gtd[api]"', err=True
+            'uvicorn not installed. Run: uv tool install "gtd-tui[api]"',
+            err=True,
         )
         raise SystemExit(1)  # noqa: B904
     uvicorn.run('gtd.api:app', host=host, port=port, reload=reload)

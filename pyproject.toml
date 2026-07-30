@@ -5,7 +5,7 @@ description = "GTD + 12-Week Year CLI powered by Notion"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.12"
-dependencies = ["click>=8.1.0", "httpx>=0.28.0", "pydantic>=2.13.4", "python-dateutil>=2.9.0.post0", "textual>=0.71.0"]
+dependencies = ["click>=8.1.0", "httpx>=0.28.0", "iterfzf>=1.9.0", "pydantic>=2.13.4", "python-dateutil>=2.9.0.post0", "textual>=0.71.0"]
 
 [project.urls]
 Repository = "https://github.com/dannybrown37/gtd"

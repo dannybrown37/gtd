@@ -1,7 +1,10 @@
 """fzf helpers, prompts, and formatting shared across CLI commands."""
 
+import shutil
 import subprocess
 from typing import Literal, overload
+
+from iterfzf import BUNDLED_EXECUTABLE
 
 __all__ = [
     'CancelAction',
@@ -12,6 +15,11 @@ __all__ = [
 
 
 FZF_CTRL_C_CODE = 130
+
+# Prefer a system fzf (picks up the user's own config/theme/version) and
+# fall back to the binary iterfzf bundles, so `uv tool install gtd-tui`
+# works without requiring a separate fzf install.
+FZF_EXECUTABLE = shutil.which('fzf') or str(BUNDLED_EXECUTABLE)
 
 
 @overload
@@ -45,13 +53,13 @@ def fzf_on_a_list(
     prompt = f'{prompt}: ' if prompt and not prompt.endswith(': ') else prompt
     if multiple:
         cmd = [
-            'fzf',
+            FZF_EXECUTABLE,
             '-m',
             '--prompt',
             f'{prompt}Shift+Tab to unselect > ',
         ]
     else:
-        cmd = ['fzf', '--prompt', prompt]
+        cmd = [FZF_EXECUTABLE, '--prompt', prompt]
     if preview is not None:
         cmd.extend(['--preview', preview, '--preview-window', 'up:wrap'])
     result = subprocess.run(  # noqa: S603
