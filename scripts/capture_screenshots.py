@@ -26,7 +26,6 @@ _OUT_DIR = Path(__file__).resolve().parent.parent / 'docs' / 'screenshots'
 _SIZE = (130, 45)
 
 _TABS = [
-    ('tab-today', 'today'),
     ('tab-next-steps', 'next-steps'),
     ('tab-inbox', 'inbox'),
     ('tab-projects', 'projects'),

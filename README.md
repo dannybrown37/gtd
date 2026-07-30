@@ -12,16 +12,12 @@ A TUI/CLI/API for personal productivity built around [GTD (Getting Things Done)]
 
 ## Screenshots
 
-<img src="docs/screenshots/today.svg" alt="Today tab" width="800">
+<img src="docs/screenshots/next-steps.svg" alt="Next Steps tab" width="800">
 
-*Today — the always-present Weekly Review reminder plus everything actionable right now, grouped by context.*
+*Next Steps — the always-present Weekly Review reminder plus everything actionable right now, grouped by context.*
 
 <details>
 <summary>More tabs</summary>
-
-<img src="docs/screenshots/next-steps.svg" alt="Next Steps tab" width="800">
-
-*Next Steps — every current project's next action, grouped by context.*
 
 <img src="docs/screenshots/inbox.svg" alt="Inbox tab" width="800">
 
@@ -79,9 +75,9 @@ This installs the `gtd` command.
 gtd
 ```
 
-With no subcommand, `gtd` launches the Textual TUI — tabs for Today, Next
-Steps, Inbox, Projects, Waiting For, Incubation, Recurring, Someday, and
-Lists, plus a guided Weekly Review. This is the primary interface.
+With no subcommand, `gtd` launches the Textual TUI — tabs for Next Steps,
+Inbox, Projects, Waiting For, Incubation, Recurring, Someday, and Lists,
+plus a guided Weekly Review. This is the primary interface.
 
 ### CLI subcommands
 
