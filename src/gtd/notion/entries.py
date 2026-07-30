@@ -84,58 +84,6 @@ def _today_filter() -> dict:
     }
 
 
-def _active_recurring_filter() -> dict:
-    """Notion filter: Recurring items whose follow-up is due (or unset)."""
-    today = datetime.now().strftime('%Y-%m-%d')
-    return {
-        'and': [
-            {'property': 'Status', 'select': {'equals': 'Recurring'}},
-            {
-                'or': [
-                    {
-                        'property': 'Follow-Up Date',
-                        'date': {'on_or_before': today},
-                    },
-                    {
-                        'property': 'Follow-Up Date',
-                        'date': {'is_empty': True},
-                    },
-                ],
-            },
-        ],
-    }
-
-
-def _recurring_due_clauses() -> list[dict]:
-    """Flattened (and-only) branches equivalent to `_active_recurring_filter`.
-
-    Notion caps compound filters at two nesting levels. Embedding
-    `_active_recurring_filter` (already `and` -> `or`) inside another `or`
-    (as Next Steps needs, alongside the Current Project branch) would add a
-    third level and Notion rejects the query with a 400. These two `and`
-    clauses carry the same meaning but sit flat inside the caller's `or`.
-    """
-    today = datetime.now().strftime('%Y-%m-%d')
-    recurring = {'property': 'Status', 'select': {'equals': 'Recurring'}}
-    return [
-        {
-            'and': [
-                recurring,
-                {
-                    'property': 'Follow-Up Date',
-                    'date': {'on_or_before': today},
-                },
-            ],
-        },
-        {
-            'and': [
-                recurring,
-                {'property': 'Follow-Up Date', 'date': {'is_empty': True}},
-            ],
-        },
-    ]
-
-
 def _get_today_entries() -> list[ProjectEntry]:
     """Fetch and filter today's actionable entries."""
     pages = query_database(filter_obj=_today_filter())

@@ -12,7 +12,6 @@ from unittest.mock import patch
 import pytest
 
 from gtd.notion.entries import (
-    _active_recurring_filter,
     _collect_field_updates,
     _entry_preview_text,
     _escape_for_shell,
@@ -87,46 +86,6 @@ class TestTodayFilter:
         assert set(result) == {'and'}
         assert len(result['and']) == 2
         assert all('or' in clause for clause in result['and'])
-
-
-# --- _active_recurring_filter: due Recurring items for Next Steps ---
-
-
-class TestActiveRecurringFilter:
-    def test_only_recurring_status_is_requested(self):
-        result = _active_recurring_filter()
-        status_clause = next(
-            c for c in result['and'] if c.get('property') == 'Status'
-        )
-
-        assert status_clause == {
-            'property': 'Status',
-            'select': {'equals': 'Recurring'},
-        }
-
-    def test_follow_up_clause_admits_due_and_unset_dates(self):
-        date_clause = _active_recurring_filter()['and'][1]['or']
-        today = datetime.now().strftime('%Y-%m-%d')
-
-        assert {
-            'property': 'Follow-Up Date',
-            'date': {'on_or_before': today},
-        } in date_clause
-        assert {
-            'property': 'Follow-Up Date',
-            'date': {'is_empty': True},
-        } in date_clause
-
-    def test_future_follow_ups_are_excluded_by_on_or_before(self):
-        """Snoozed recurring items must not leak into Next Steps early."""
-        date_clause = _active_recurring_filter()['and'][1]['or']
-        bounds = [
-            c['date']['on_or_before']
-            for c in date_clause
-            if 'on_or_before' in c['date']
-        ]
-
-        assert bounds == [datetime.now().strftime('%Y-%m-%d')]
 
 
 # --- _escape_for_shell: preview text is interpolated into `echo '...'` ---

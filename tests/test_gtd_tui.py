@@ -29,7 +29,6 @@ from gtd.gtd_tui import (
     SeparatorListItem,
     SomedayBrowseScreen,
     SomedayContent,
-    TodayContent,
     WaitingForBrowseScreen,
     _classify_network_error,
     _open_steps_editor,
@@ -527,7 +526,7 @@ class TestTabBarBottomJump:
             with (
                 patch.object(BaseEntryContent, '_load_entries'),
                 patch.object(BaseEntryContent, '_load_notes'),
-                patch.object(TodayContent, '_load_entries'),
+                patch.object(NextStepsContent, '_load_entries'),
                 patch.object(ListsContent, '_load_notion_categories'),
                 patch.object(SomedayContent, '_load_notion_areas'),
             ):
@@ -582,40 +581,6 @@ class _TabHost(App):
         yield self._content
 
 
-class TestNextStepsBuildFilter:
-    """Next Steps must surface due Recurring items too.
-
-    Not just Current Project — a recurring task is just as actionable
-    once its follow-up date arrives.
-    """
-
-    def test_requests_current_project_and_active_recurring(self):
-        clauses = NextStepsContent()._build_filter()['or']  # noqa: SLF001
-
-        assert {
-            'property': 'Status',
-            'select': {'equals': 'Current Project'},
-        } in clauses
-        assert any(
-            c.get('and', [{}])[0]
-            == {'property': 'Status', 'select': {'equals': 'Recurring'}}
-            for c in clauses
-        )
-
-    def test_stays_within_notions_two_level_filter_nesting(self):
-        """Notion rejects filters nested more than two levels (400).
-
-        `or` -> `and` -> `or` is three levels and was previously sent as
-        one clause; it must come back flattened to `or` -> `and` -> leaf.
-        """
-        clauses = NextStepsContent()._build_filter()['or']  # noqa: SLF001
-
-        for clause in clauses:
-            for sub in clause.get('and', []):
-                assert 'or' not in sub
-                assert 'and' not in sub
-
-
 class TestFilterRebuildHighlight:
     """The user-facing trigger: rebuilding an already-populated list.
 
@@ -636,6 +601,7 @@ class TestFilterRebuildHighlight:
             with (
                 patch.object(NextStepsContent, '_load_entries'),
                 patch.object(NextStepsContent, '_load_notes'),
+                patch('gtd.storage.get_weekly_habit_date', return_value=None),
             ):
                 async with app.run_test() as pilot:
                     await content._set_entries(entries)  # noqa: SLF001
@@ -650,12 +616,14 @@ class TestFilterRebuildHighlight:
 
     def test_single_match_is_highlighted(self):
         # 'Home' has exactly one entry — the reported one-item case.
+        # The Weekly Review habit row is always first and always enabled,
+        # so it — not the entry — claims the highlight on rebuild.
         highlighted = self._next_steps_highlight('Home')
-        assert highlighted == [False, True]  # separator, then the entry
+        assert highlighted == [True, False, False]  # habit, separator, entry
 
     def test_multi_match_highlights_first_entry(self):
         highlighted = self._next_steps_highlight('Work')
-        assert highlighted == [False, True, False]
+        assert highlighted == [True, False, False, False]
 
     def test_select_modal_filtered_to_one_is_highlighted(self):
         async def run() -> list[bool]:
@@ -688,11 +656,11 @@ class TestTodayHabitRow:
         entries: list[ProjectEntry] | None = None,
     ) -> list[str]:
         async def run() -> list[str]:
-            content = TodayContent()
+            content = NextStepsContent()
             app = _TabHost(content)
             with (
-                patch.object(TodayContent, '_load_entries'),
-                patch.object(TodayContent, '_load_notes'),
+                patch.object(NextStepsContent, '_load_entries'),
+                patch.object(NextStepsContent, '_load_notes'),
                 patch(
                     'gtd.storage.get_weekly_habit_date',
                     return_value=last_done,
@@ -745,12 +713,12 @@ class TestTodayHabitRow:
 
     def test_marking_done_flips_the_row_in_place(self):
         async def run() -> tuple[int, str]:
-            content = TodayContent()
+            content = NextStepsContent()
             app = _TabHost(content)
             done: list[str] = []
             with (
-                patch.object(TodayContent, '_load_entries'),
-                patch.object(TodayContent, '_load_notes'),
+                patch.object(NextStepsContent, '_load_entries'),
+                patch.object(NextStepsContent, '_load_notes'),
                 patch(
                     'gtd.storage.get_weekly_habit_date',
                     side_effect=lambda _k: done[0] if done else None,

@@ -2030,13 +2030,13 @@ class WeeklyReviewScreen(ModalScreen[bool]):
         self.dismiss(result=False)
 
 
-# ── Today content ────────────────────────────────────────────────────────────
+# ── Next Steps content ───────────────────────────────────────────────────────
 
 
-class TodayContent(BaseEntryContent):
+class NextStepsContent(BaseEntryContent):
     """Today's actionable items — the GTD daily driver."""
 
-    TITLE: ClassVar[str] = 'Today'
+    TITLE: ClassVar[str] = 'Next Steps'
     EMPTY_MSG: ClassVar[str] = 'All clear. Nice work.'
 
     BINDINGS: ClassVar[list[Binding]] = [
@@ -2123,18 +2123,18 @@ class TodayContent(BaseEntryContent):
         # both speak only to the GTD entries.
         if not filtered:
             if self._ctx_filter:
-                header.update(f'Today — empty{ctx_badge}')
+                header.update(f'Next Steps — empty{ctx_badge}')
                 detail.update(
                     f'[dim]No items in context "{self._ctx_filter}".[/dim]'
                 )
             else:
-                header.update('Today — nothing actionable 🎉')
+                header.update('Next Steps — nothing actionable 🎉')
                 detail.update('[dim]All clear. Nice work.[/dim]')
         else:
             total = len(self._entries)
             shown = len(filtered)
             count = f'({shown}/{total})' if self._ctx_filter else f'({total})'
-            header.update(f'Today  [dim]{count}[/dim]{ctx_badge}')
+            header.update(f'Next Steps  [dim]{count}[/dim]{ctx_badge}')
         self._update_detail()
 
     @on(ListView.Highlighted, '#entry-list')
@@ -2241,9 +2241,6 @@ class TodayContent(BaseEntryContent):
         self._update_detail()
         self.app.refresh_bindings()
         self.app.notify(f'✓ {item.habit_label} done for this week')
-
-    def action_refresh_today(self) -> None:
-        self.action_refresh()
 
     @work
     async def action_log(self) -> None:
@@ -3186,115 +3183,6 @@ class ProjectsContent(BaseEntryContent):
         self.app.notify('✓ Steps updated')
 
 
-# ── Next Steps content ───────────────────────────────────────────────────────
-
-
-class NextStepsContent(BaseEntryContent):
-    """Context-divided, filterable next steps for all in-flight projects."""
-
-    TITLE: ClassVar[str] = 'Next Steps'
-    EMPTY_MSG: ClassVar[str] = 'No in-flight projects.'
-
-    BINDINGS: ClassVar[list[Binding]] = [
-        Binding('U', 'update_entry', 'Update'),
-        Binding('S', 'edit_steps', 'Steps'),
-        Binding('N', 'edit_notes', 'Notes'),
-        Binding('D', 'mark_done', 'Done'),
-        Binding('X', 'complete_step', 'Complete Step'),
-        Binding('F', 'filter_context', 'Filter ctx'),
-    ]
-
-    def __init__(self) -> None:
-        super().__init__()
-        self._ctx_filter: str | None = None
-
-    def _build_filter(self) -> dict:
-        from gtd.notion.entries import _recurring_due_clauses
-
-        return {
-            'or': [
-                {
-                    'property': 'Status',
-                    'select': {'equals': 'Current Project'},
-                },
-                *_recurring_due_clauses(),
-            ],
-        }
-
-    def _filtered_entries(self) -> list[ProjectEntry]:
-        if self._ctx_filter:
-            return [e for e in self._entries if e.context == self._ctx_filter]
-        return self._entries
-
-    async def _set_entries(self, entries: list[ProjectEntry]) -> None:
-        entries.sort(key=lambda e: (e.context or '\xff', e.header.lower()))
-        self._entries = entries
-        with contextlib.suppress(Exception):
-            self.query_one('#entry-loading', LoadingIndicator).display = False
-        await self._rebuild_list()
-
-    async def _rebuild_list(self) -> None:
-        filtered = self._filtered_entries()
-        lv = self.query_one('#entry-list', VimListView)
-        await repopulate(
-            lv, _context_grouped_items(filtered, NextStepListItem)
-        )
-
-        detail = self.query_one('#entry-detail', Static)
-        header = self.query_one('#entry-list-header', Static)
-
-        ctx_badge = (
-            f'  [yellow][{self._ctx_filter}][/yellow]'
-            if self._ctx_filter
-            else ''
-        )
-        total = len(self._entries)
-        shown = len(filtered)
-        count = f'({shown}/{total})' if self._ctx_filter else f'({total})'
-
-        if not filtered:
-            header.update(f'{self.TITLE} — empty')
-            detail.update(f'[dim]{self.EMPTY_MSG}[/dim]')
-        else:
-            header.update(f'{self.TITLE}  [dim]{count}[/dim]{ctx_badge}')
-            self._update_detail()
-
-    def _current_entry(self) -> ProjectEntry | None:
-        item = self.query_one('#entry-list', VimListView).highlighted_child
-        if not isinstance(item, NextStepListItem):
-            return None
-        return next(
-            (e for e in self._entries if e.page_id == item.page_id), None
-        )
-
-    @work
-    async def action_filter_context(self) -> None:
-        contexts = sorted({e.context for e in self._entries if e.context})
-        options = ['(All)', *contexts]
-        choice = await self.app.push_screen_wait(
-            SelectModal('Filter by context', options)
-        )
-        if choice is None:
-            return
-        self._ctx_filter = None if choice == '(All)' else choice
-        await self._rebuild_list()
-
-    @work
-    async def action_edit_steps(self) -> None:
-        entry = self._current_entry()
-        if not entry:
-            return
-        val = await _open_steps_editor(
-            self.app, initial_text=entry.next_step or ''
-        )
-        if val is None:
-            return
-        self._update_worker(entry.page_id, {'next_step': val})
-        entry.next_step = val
-        self._update_detail()
-        self.app.notify('✓ Steps updated')
-
-
 # ── Recurring content ────────────────────────────────────────────────────────
 
 
@@ -4063,7 +3951,6 @@ def _classify_network_error(err: Exception) -> tuple[str, str]:
 
 
 _TAB_LABELS: dict[str, str] = {
-    'tab-today': 'Today',
     'tab-next-steps': 'Next Steps',
     'tab-inbox': 'Inbox',
     'tab-waiting': 'Waiting For',
@@ -4192,8 +4079,6 @@ class GTDApp(App[None]):
     def compose(self) -> ComposeResult:
         yield Header()
         with TabbedContent(id='tabs'):
-            with TabPane('Today', id='tab-today'):
-                yield TodayContent()
             with TabPane('Next Steps', id='tab-next-steps'):
                 yield NextStepsContent()
             with TabPane('Inbox', id='tab-inbox'):

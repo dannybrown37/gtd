@@ -32,25 +32,28 @@ src/gtd/
 
 ## TUI Layout (GTDApp)
 
-Tabs: **Today | Next Steps | Inbox | Projects | Waiting For | Incubation | Recurring | Someday | Lists**
+Tabs: **Next Steps | Inbox | Projects | Waiting For | Incubation | Recurring | Someday | Lists**
 
-All entry tabs extend `BaseEntryContent(Vertical)` with stable IDs (`#entry-list`, `#entry-detail`, etc.) and shared infrastructure. Override `_build_filter()` to define what Notion entries appear. `TodayContent` overrides `_load_entries()` entirely (uses `_get_today_entries()`).
+All entry tabs extend `BaseEntryContent(Vertical)` with stable IDs (`#entry-list`, `#entry-detail`, etc.) and shared infrastructure. Override `_build_filter()` to define what Notion entries appear. `NextStepsContent` (the home tab) overrides `_load_entries()` entirely (uses `_get_today_entries()`) rather than using `_build_filter()`.
 
-### Today tab
+There used to be a separate "Today" tab and "Next Steps" tab; they were merged (2026-07-30) because they were nearly identical — the only real differences were that Today applied a follow-up-date filter (hiding snoozed items) that Next Steps lacked, and only Today carried the Weekly Review habit row. `NextStepsContent` is what `TodayContent` used to be, renamed and promoted to the first/home tab; the old separate `NextStepsContent` (a plain `Current Project` + due-`Recurring` filter with no date restriction) was deleted outright, along with the now-unused `_active_recurring_filter`/`_recurring_due_clauses` helpers in `notion/entries.py` it was the only caller of.
 
-The Today tab has two sections in the left list:
+### Next Steps tab (home tab)
+
+The Next Steps tab has two sections in the left list:
 
 1. **Weekly habit reminders** (top, always listed — done or not):
    - `● Weekly Review` — `W` opens a guided 6-step flow via `WeeklyReviewScreen` modal. Steps: (1) Triage Inbox, (2) Review Projects, (3) Review Waiting For, (4) Review Someday/Maybe [uses `SomedayBrowseScreen`], (5) Review Areas of Focus, (6) Plan next week's priorities + Review Calendar [manual steps]. State persisted per-week in `weekly_habits.json` under `review_state`; resumes at first incomplete step.
    - Pending: red `●` + `not done this week`. Done: green `●` + `last: <when>` (`_habit_last_done_str`). The row never disappears — `_mark_habit_done` flips it in place via `WeeklyHabitItem.refresh_label()`, and `W` stays available to re-run the review.
    - Uses `check_action` to show `W` only when habit item is focused
    - Completion stored in `~/.local/share/gtd/weekly_habits.json`; resets each Monday
+   - Because the habit row is always present and always enabled, `repopulate()` (which highlights the first non-disabled item) puts the highlight on it after every list rebuild — including after applying a context filter with `F`. Filtering down to one matching entry does *not* move the highlight onto that entry; it stays on the habit row.
 
 2. **GTD entries** — standard entries from Notion, grouped by context. No divider between the habit rows and the entries.
 
-The Today header count and its "nothing actionable 🎉" empty state describe the GTD entries only, since a habit row is always present.
+The header count and its "nothing actionable 🎉" empty state describe the GTD entries only, since a habit row is always present.
 
-**`check_action` in TodayContent** — two mutually exclusive modes:
+**`check_action` in NextStepsContent** — two mutually exclusive modes:
 - `_HABIT_ACTIONS = {'complete_habit'}` — only active when habit focused
 - `_GTD_ACTIONS = {log, snooze, waiting_for, update_entry, edit_notes, mark_done}` — only active when GTD entry focused
 - Returns explicit `True`/`False` (not `None`) for both sets
@@ -139,7 +142,7 @@ Two-mode design: opens in **browse mode** (ListView focused, j/k navigate). **Ta
 
 **ProjectEntry** (Notion-backed): `page_id`, `header`, `status`, `context`, `next_step`, `due_date`, `follow_up_date`, `list_category`, `area`
 
-**STATUSES** (schema.py): includes `'Recurring'` — items surface on Today when follow_up_date ≤ today; `action_mark_done` on recurring items offers Reschedule vs Permanently complete. Run `gtd init --upgrade` to add new statuses to an existing Notion DB.
+**STATUSES** (schema.py): includes `'Recurring'` — items surface on Next Steps when follow_up_date ≤ today; `action_mark_done` on recurring items offers Reschedule vs Permanently complete. Run `gtd init --upgrade` to add new statuses to an existing Notion DB.
 
 ## Shared Action Helpers (gtd_tui.py module-level)
 
