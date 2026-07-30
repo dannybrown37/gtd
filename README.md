@@ -10,6 +10,51 @@ A TUI/CLI/API for personal productivity built around [GTD (Getting Things Done)]
 - Defer, snooze, and review Someday/Maybe lists
 - Filter by context for focused work sessions
 
+## Screenshots
+
+<img src="docs/screenshots/today.svg" alt="Today tab" width="800">
+
+*Today — the always-present Weekly Review reminder plus everything actionable right now, grouped by context.*
+
+<details>
+<summary>More tabs</summary>
+
+<img src="docs/screenshots/next-steps.svg" alt="Next Steps tab" width="800">
+
+*Next Steps — every current project's next action, grouped by context.*
+
+<img src="docs/screenshots/inbox.svg" alt="Inbox tab" width="800">
+
+*Inbox — unprocessed captures waiting to be triaged.*
+
+<img src="docs/screenshots/projects.svg" alt="Projects tab" width="800">
+
+*Projects — all Current Project and Waiting For items.*
+
+<img src="docs/screenshots/waiting-for.svg" alt="Waiting For tab" width="800">
+
+*Waiting For — items delegated and waiting on someone else.*
+
+<img src="docs/screenshots/incubation.svg" alt="Incubation tab" width="800">
+
+*Incubation — current projects snoozed past today's follow-up date.*
+
+<img src="docs/screenshots/recurring.svg" alt="Recurring tab" width="800">
+
+*Recurring — habits and chores that repeat on their own schedule.*
+
+<img src="docs/screenshots/someday.svg" alt="Someday tab" width="800">
+
+*Someday — parked ideas, grouped by Area of Focus.*
+
+<img src="docs/screenshots/lists.svg" alt="Lists tab" width="800">
+
+*Lists — books to read, restaurants to try, and other reference lists, grouped by category.*
+
+</details>
+
+*(Screenshots use fictional demo data — see `scripts/seed_demo_data.py` and `scripts/capture_screenshots.py` to regenerate them.)*
+
 ## Requirements
 
 - Python 3.12+
@@ -177,7 +222,9 @@ src/gtd/
     ├── today.py    # Today view and snooze commands.
     └── triage.py   # Interactive triage flow for processing inbox items.
 scripts/
+├── capture_screenshots.py    # Capture SVG screenshots of every GTD TUI tab, for docs/README.
 ├── check_commit_msg_early.py # Validate the commit message during the *pre-commit* stage, not commit-msg.
+├── seed_demo_data.py         # Create/reseed a demo GTD Notion database with fake data, for screenshots.
 └── update_readme.py          # Update README.md menu, CLI, tree, and HTTP API sections from source.
 ```
 <!-- END TREE -->
