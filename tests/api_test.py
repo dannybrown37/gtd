@@ -30,6 +30,7 @@ ROUTES = [
     ('post', '/capture'),
     ('get', '/list-categories'),
     ('get', '/list/test'),
+    ('post', '/done/page-1'),
 ]
 
 
@@ -189,6 +190,49 @@ def test_list_by_category_case_insensitive(
     response = client.get('/list/books%20to%20read', headers=auth_header)
     assert response.status_code == 200
     assert response.get_json() == []
+
+
+def test_done_marks_entry_deleted(
+    client: FlaskClient,
+    auth_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        api, '_get_page_by_id', MagicMock(return_value={'id': 'page-1'})
+    )
+    monkeypatch.setattr(api, 'archive_page', MagicMock(return_value={}))
+    response = client.post('/done/page-1', headers=auth_header)
+    assert response.status_code == 200
+    assert response.get_json() == {'deleted': True}
+
+
+def test_done_missing_entry_returns_404(
+    client: FlaskClient,
+    auth_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(api, '_get_page_by_id', MagicMock(return_value=None))
+    response = client.post('/done/missing', headers=auth_header)
+    assert response.status_code == 404
+    assert 'error' in response.get_json()
+
+
+def test_done_handles_archive_failure(
+    client: FlaskClient,
+    auth_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        api, '_get_page_by_id', MagicMock(return_value={'id': 'page-1'})
+    )
+    monkeypatch.setattr(
+        api,
+        'archive_page',
+        MagicMock(side_effect=RuntimeError('boom')),
+    )
+    response = client.post('/done/page-1', headers=auth_header)
+    assert response.status_code == 500
+    assert 'error' in response.get_json()
 
 
 def test_list_by_category_handles_notion_error(

@@ -183,12 +183,18 @@ your own token.
 <!-- BEGIN API MENU -->
 | Method | Path | Description |
 | --- | --- | --- |
+| `GET` | `/` | Serve the mobile web app shell. |
+| `GET` | `/app.js` | Serve the web app's client-side JS. |
 | `POST` | `/capture` | Add an item to the inbox. Body: {"header": "..."}. |
 | `GET` | `/contexts` | Get active contexts. |
+| `POST` | `/done/<page_id>` | Mark an entry done (archives the page). |
+| `GET` | `/icons/<path:filename>` | Serve the web app's PWA icons. |
 | `GET` | `/inbox` | Get all Triage entries (inbox). |
 | `GET` | `/list-categories` | Return canonical list categories from Notion (for debugging/UI use). |
 | `GET` | `/list/<category>` | Get all entries in a specific list category. |
+| `GET` | `/manifest.json` | Serve the PWA manifest. |
 | `GET` | `/next-steps` | Get actionable next steps, optionally filtered by context. |
+| `GET` | `/styles.css` | Serve the web app's stylesheet. |
 | `GET` | `/triage-schema` | Get schema for triage workflow: statuses and contexts per status. |
 | `POST` | `/triage/<page_id>` | Atomically triage an entry with full data. |
 <!-- END API MENU -->
@@ -225,20 +231,22 @@ src/gtd/
 ├── storage.py      # Local JSON I/O for weekly review state and habit dates.
 ├── tui.py          # Shared Textual widgets and modals for the GTD TUI.
 ├── ui.py           # fzf helpers, prompts, and formatting shared across CLI commands.
-└── notion/
-    ├── capture.py  # Quick-capture items to the GTD inbox (Notion Projects table).
-    ├── client.py   # Notion REST API client (httpx).
-    ├── commands.py # Manage commands: mark done, defer, waiting for, notion dispatch.
-    ├── config.py   # Configuration management for GTD CLI.
-    ├── display.py  # Display formatting for Notion entries.
-    ├── entries.py  # Entry listing, selection, and field editing.
-    ├── init.py     # Database initialization and schema management for GTD CLI.
-    ├── log.py      # Log, reschedule, and recurring-item utilities.
-    ├── models.py   # Parse Notion page properties into simple data structures.
-    ├── review.py   # Weekly review and Someday/Maybe review flows.
-    ├── schema.py   # GTD Notion database schema definition — single source of truth.
-    ├── today.py    # Today view and snooze commands.
-    └── triage.py   # Interactive triage flow for processing inbox items.
+├── notion/
+│   ├── capture.py  # Quick-capture items to the GTD inbox (Notion Projects table).
+│   ├── client.py   # Notion REST API client (httpx).
+│   ├── commands.py # Manage commands: mark done, defer, waiting for, notion dispatch.
+│   ├── config.py   # Configuration management for GTD CLI.
+│   ├── display.py  # Display formatting for Notion entries.
+│   ├── entries.py  # Entry listing, selection, and field editing.
+│   ├── init.py     # Database initialization and schema management for GTD CLI.
+│   ├── log.py      # Log, reschedule, and recurring-item utilities.
+│   ├── models.py   # Parse Notion page properties into simple data structures.
+│   ├── review.py   # Weekly review and Someday/Maybe review flows.
+│   ├── schema.py   # GTD Notion database schema definition — single source of truth.
+│   ├── today.py    # Today view and snooze commands.
+│   └── triage.py   # Interactive triage flow for processing inbox items.
+└── webapp/
+    └── icons/
 scripts/
 ├── capture_screenshots.py    # Capture SVG screenshots of every GTD TUI tab, for docs/README.
 ├── check_commit_msg_early.py # Validate the commit message during the *pre-commit* stage, not commit-msg.

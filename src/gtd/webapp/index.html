@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>GTD</title>
+<link rel="manifest" href="/manifest.json" />
+<link rel="apple-touch-icon" href="/icons/icon-192.png" />
+<link rel="icon" href="/icons/icon-192.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="GTD" />
+<meta name="theme-color" content="#0f172a" />
+<link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+<header class="topbar">
+  <h1>GTD</h1>
+  <button id="settings-btn" class="icon-btn" aria-label="Settings">⚙</button>
+</header>
+
+<main id="views">
+  <section id="view-next-steps" class="view">
+    <div id="context-chips" class="chips"></div>
+    <ul id="next-steps-list" class="entry-list"></ul>
+    <p id="next-steps-empty" class="empty hidden">Nothing actionable 🎉</p>
+  </section>
+
+  <section id="view-capture" class="view hidden">
+    <form id="capture-form">
+      <textarea id="capture-input" placeholder="What's on your mind?" autocomplete="off"></textarea>
+      <button type="submit">Capture</button>
+    </form>
+    <p id="capture-status" class="status"></p>
+  </section>
+
+  <section id="view-inbox" class="view hidden">
+    <ul id="inbox-list" class="entry-list"></ul>
+    <p id="inbox-empty" class="empty hidden">Inbox is empty 🎉</p>
+  </section>
+</main>
+
+<nav class="tabbar">
+  <button class="tab active" data-view="next-steps">Next Steps</button>
+  <button class="tab" data-view="capture">Capture</button>
+  <button class="tab" data-view="inbox">Inbox</button>
+</nav>
+
+<div id="modal-backdrop" class="modal-backdrop hidden">
+  <div id="modal" class="modal"></div>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>

@@ -7,6 +7,7 @@ import os
 from dataclasses import asdict
 from datetime import datetime
 from functools import wraps
+from pathlib import Path
 from typing import Any, TYPE_CHECKING
 from urllib.parse import unquote_plus
 from zoneinfo import ZoneInfo
@@ -15,7 +16,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 import httpx
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_from_directory
 from dateutil import parser as dateparser
 
 from gtd.notion.capture import _create_page
@@ -44,6 +45,8 @@ EXCLUDE_THESE = [  # attributes not currently ever needed in iOS Shortcuts
 ]
 
 app = Flask(__name__)
+
+WEBAPP_DIR = Path(__file__).parent / 'webapp'
 
 # Configure logging
 GTD_DEBUG = os.environ.get('GTD_DEBUG') == '1'
@@ -451,6 +454,20 @@ def get_list(category: str) -> Any:
     return jsonify([_entry_dict(e, extra_excludes) for e in entries])
 
 
+@app.post('/done/<page_id>')
+@require_auth
+def done(page_id: str) -> Any:
+    """Mark an entry done (archives the page)."""
+    page_data = _get_page_by_id(page_id)
+    if not page_data:
+        return jsonify(error=f'Entry {page_id} not found'), 404
+    try:
+        archive_page(page_id)
+    except (ValueError, RuntimeError, OSError) as err:
+        return jsonify(error=f'Mark done failed: {err}'), 500
+    return jsonify(deleted=True), 200
+
+
 @app.post('/triage/<page_id>')
 @require_auth
 def triage(page_id: str) -> Any:  # noqa: PLR0911,C901
@@ -550,6 +567,41 @@ def triage(page_id: str) -> Any:  # noqa: PLR0911,C901
             'Unexpected error while applying triage updates for %s', page_id
         )
         return jsonify(error='Internal server error'), 500
+
+
+# endregion
+
+# region Web App
+
+
+@app.get('/')
+def webapp_index() -> Any:
+    """Serve the mobile web app shell."""
+    return send_from_directory(WEBAPP_DIR, 'index.html')
+
+
+@app.get('/manifest.json')
+def webapp_manifest() -> Any:
+    """Serve the PWA manifest."""
+    return send_from_directory(WEBAPP_DIR, 'manifest.json')
+
+
+@app.get('/app.js')
+def webapp_script() -> Any:
+    """Serve the web app's client-side JS."""
+    return send_from_directory(WEBAPP_DIR, 'app.js')
+
+
+@app.get('/styles.css')
+def webapp_styles() -> Any:
+    """Serve the web app's stylesheet."""
+    return send_from_directory(WEBAPP_DIR, 'styles.css')
+
+
+@app.get('/icons/<path:filename>')
+def webapp_icons(filename: str) -> Any:
+    """Serve the web app's PWA icons."""
+    return send_from_directory(WEBAPP_DIR / 'icons', filename)
 
 
 # endregion

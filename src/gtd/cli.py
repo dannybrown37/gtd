@@ -489,14 +489,14 @@ def tui() -> None:
 def api(host: str, port: int, reload: bool) -> None:
     """Start the GTD HTTP API server (requires: gtd-tui[api])."""
     try:
-        import uvicorn
+        from gtd.api import app
     except ImportError:
         click.echo(
-            'uvicorn not installed. Run: uv tool install "gtd-tui[api]"',
+            'flask not installed. Run: uv tool install "gtd-tui[api]"',
             err=True,
         )
         raise SystemExit(1)  # noqa: B904
-    uvicorn.run('gtd.api:app', host=host, port=port, reload=reload)
+    app.run(host=host, port=port, use_reloader=reload)
 
 
 def main() -> None:
