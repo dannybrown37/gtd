@@ -11,6 +11,7 @@ A TUI/CLI/API for personal productivity built around [GTD (Getting Things Done)]
 - Filter by context for focused work sessions
 - Organize reference lists (books, restaurants, etc.) by List Category
 - Manage Areas of Focus and List Categories directly from the TUI or CLI
+- Track @Person agendas
 
 ## Screenshots
 
