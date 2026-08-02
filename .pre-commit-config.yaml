@@ -2,19 +2,13 @@ default_install_hook_types: [pre-commit, commit-msg]
 default_stages: [pre-commit]
 
 repos:
-  # Git runs the whole pre-commit stage before it ever reaches commit-msg, so
-  # the commitizen hook below can only reject a bad message *after* the tests.
-  # This one recovers the `git commit -m` message from git's argv and checks it
-  # first, so a malformed message fails in ~1s instead of ~15s.
-  - repo: local
+  # Rejects a bad commit message during the pre-commit stage, before the ~15s
+  # test hook, by recovering it from git's argv -- the commitizen hook below
+  # runs in a separate git invocation and can only ever fail after the suite.
+  - repo: https://github.com/dannybrown37/git-a-grip
+    rev: v0.1.0
     hooks:
       - id: commitizen-early
-        name: Commitizen check (early)
-        entry: python3 scripts/check_commit_msg_early.py
-        language: system
-        stages: [pre-commit]
-        always_run: true
-        pass_filenames: false
         fail_fast: true
 
   - repo: https://github.com/commitizen-tools/commitizen
