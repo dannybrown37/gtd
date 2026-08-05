@@ -21,6 +21,9 @@ gtd = "gtd.cli:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+gtd = ["webapp/*", "webapp/icons/*"]
+
 
 [build-system]
 requires = ["setuptools>=75.0"]

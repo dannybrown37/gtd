@@ -9,6 +9,7 @@ from gtd.ui import CancelAction
 
 
 @click.group(invoke_without_command=True)
+@click.version_option(package_name='gtd-tui')
 @click.option('-v', '--verbose', is_flag=True, help='Show details')
 @click.pass_context
 def cli(ctx: click.Context, verbose: bool) -> None:
