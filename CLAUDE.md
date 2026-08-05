@@ -90,7 +90,7 @@ Changes are collected (`_to_done: list`, `_status_changes: dict[str, str]`) and 
 
 ### Other tabs
 
-- **Recurring** — Status == 'Recurring'; `L` log+reschedule (stays in list), `D` drop
+- **Recurring** — Status == 'Recurring'; `D` drop. Rescheduling happens through `D: Done` → *Reschedule* (see below), not a separate key — there is no `L` binding here.
 - **Waiting For** — Status == 'Waiting For'
 - **Incubation** — Current Project + follow_up > today
 - **Projects** — standard status filter
@@ -147,7 +147,9 @@ Two-mode design: opens in **browse mode** (ListView focused, j/k navigate). **Ta
 
 ## Shared Action Helpers (gtd_tui.py module-level)
 
-- `_shared_log_and_reschedule(app, entry, notes_cache)` — opens editor, saves notes, infers or prompts reschedule date, updates Notion. Returns new date string or None.
+- `_shared_reschedule_only(app, entry)` — sets a recurring entry's next follow-up date and nothing else. Infers the date from a cadence header prefix (`Daily:`/`Weekly:`/`2x/week:`/`3x/week:`, see `_infer_reschedule_days`) and only asks a `ConfirmModal` to accept it; declining falls through to the manual `InputModal` rather than cancelling. Returns new date string or None.
+
+  It replaced `_shared_log_and_reschedule`, which opened `$EDITOR` on the notes body and prompted for a Context before reaching the date — three interactions for one decision — and applied an inferred date silently with no confirmation. That function's only live caller was `action_mark_done`'s *Reschedule* branch; the two other callers (`BaseEntryContent.action_log_and_reschedule`, `NextStepsContent.action_log`) had no key binding on any widget and were deleted with it. `TestNoDeadRescheduleActions` guards against re-adding an unbound action of that shape.
 - `_shared_edit_notes(app, entry, notes_cache, refresh_cb)` — opens editor, saves notes only.
 - `_prompt_and_get_props(app, entry, field)` — prompts for a single field update, returns props dict.
 

@@ -1148,3 +1148,124 @@ class TestBrowseUpdateAction:
         screen_name, error = asyncio.run(run())
         assert error is None
         assert screen_name == 'SelectModal'
+
+
+class TestRescheduleOnly:
+    """Reschedule from `D: done` asks for a date and nothing else.
+
+    It used to route through the log-and-reschedule flow, which opened
+    `$EDITOR` on the notes body and prompted for a Context before it ever
+    got to the date — three interactions for what is one decision.
+    """
+
+    def _run(self, entry, keys, updated) -> str | None:
+        async def run() -> str | None:
+            app = _BrowseHost()
+            with (
+                patch(
+                    'gtd.notion.client.update_page',
+                    side_effect=lambda pid, p: updated.append((pid, p)),
+                ),
+                patch(
+                    'gtd.notion.client.build_property_update',
+                    side_effect=lambda **kw: kw,
+                ),
+            ):
+                async with app.run_test(size=(100, 24)) as pilot:
+                    worker = app.run_worker(
+                        gtd.gtd_tui._shared_reschedule_only(app, entry)  # noqa: SLF001
+                    )
+                    for _ in range(6):
+                        await pilot.pause()
+                    for key in keys:
+                        await pilot.press(key)
+                        for _ in range(4):
+                            await pilot.pause()
+                    await worker.wait()
+                    return worker.result
+
+        return asyncio.run(run())
+
+    def test_inferred_cadence_only_asks_for_confirmation(self):
+        entry = _entry(header='Daily: Meditate', status='Recurring')
+        updated: list[tuple] = []
+        expected = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
+
+        result = self._run(entry, ['y'], updated)
+
+        assert result == expected
+        assert updated == [('abc123', {'follow_up_date': expected})]
+
+    def test_declining_the_inferred_date_falls_through_to_input(self):
+        entry = _entry(header='Weekly: Review', status='Recurring')
+        updated: list[tuple] = []
+
+        result = self._run(entry, ['n', *'2026-09-01', 'enter'], updated)
+
+        assert result == '2026-09-01'
+        assert updated == [('abc123', {'follow_up_date': '2026-09-01'})]
+
+    def test_uninferable_header_prompts_for_a_date(self):
+        entry = _entry(header='Water the plants', status='Recurring')
+        updated: list[tuple] = []
+
+        result = self._run(entry, [*'2026-09-01', 'enter'], updated)
+
+        assert result == '2026-09-01'
+        assert updated == [('abc123', {'follow_up_date': '2026-09-01'})]
+
+    def test_cancelling_the_date_prompt_writes_nothing(self):
+        entry = _entry(header='Water the plants', status='Recurring')
+        updated: list[tuple] = []
+
+        result = self._run(entry, ['escape'], updated)
+
+        assert result is None
+        assert updated == []
+
+    def test_no_editor_or_context_prompt_is_involved(self):
+        """The whole point: no $EDITOR, no Context question."""
+        entry = _entry(header='Daily: Meditate', status='Recurring')
+        updated: list[tuple] = []
+
+        with (
+            patch('gtd.gtd_tui._get_edited_body') as edited,
+            patch('gtd.notion.client.get_page_body') as body,
+            patch('gtd.notion.client.get_select_options') as opts,
+        ):
+            self._run(entry, ['y'], updated)
+
+        assert not edited.called
+        assert not body.called
+        assert not opts.called
+
+
+class TestNoDeadRescheduleActions:
+    """The unbound log-and-reschedule actions are gone.
+
+    `action_log` and `action_log_and_reschedule` had no key binding on any
+    widget — nothing could reach them. They stayed behind as plausible-
+    looking code that documentation then described as live features.
+    """
+
+    @pytest.mark.parametrize(
+        'action', ['log', 'log_and_reschedule', 'reschedule_only']
+    )
+    def test_no_widget_defines_an_unbound_action(self, action):
+        widgets = [
+            NextStepsContent,
+            BaseEntryContent,
+            SomedayContent,
+            ListsContent,
+        ]
+        bound = {
+            b.action
+            for w in widgets
+            for b in getattr(w, 'BINDINGS', [])
+            if isinstance(b, Binding)
+        }
+        for widget in widgets:
+            if hasattr(widget, f'action_{action}'):
+                assert action in bound, (
+                    f'{widget.__name__}.action_{action} has no binding'
+                )

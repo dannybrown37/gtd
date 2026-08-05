@@ -798,56 +798,32 @@ async def _shared_edit_notes(
     refresh_cb()
 
 
-async def _shared_log_and_reschedule(
+async def _shared_reschedule_only(
     app: App,
     entry: ProjectEntry,
-    notes_cache: dict[str, str],
 ) -> str | None:
-    """Edit notes, update context, then prompt/infer next follow-up.
+    """Set a recurring entry's next follow-up date, and nothing else.
+
+    Rescheduling is one decision, so this asks one question. When the
+    header carries a cadence ('Daily:', 'Weekly:', ...) the date is
+    inferred and only confirmed; declining the inferred date falls
+    through to the manual prompt rather than cancelling.
 
     Returns the new follow-up date string, or None if cancelled.
     """
-    from gtd.notion.client import (
-        get_page_body,
-        get_select_options,
-        replace_page_body,
-    )
-
-    loop = asyncio.get_running_loop()
-    try:
-        body = await loop.run_in_executor(None, get_page_body, entry.page_id)
-    except Exception as e:
-        app.notify(f'Error: {e}', severity='error')
-        return None
-
-    new_body = await _get_edited_body(app, entry.header.strip(), body)
-    if new_body is None:
-        return None
-    if new_body != body:
-        await loop.run_in_executor(
-            None, replace_page_body, entry.page_id, new_body
-        )
-        notes_cache[entry.page_id] = new_body
-        app.notify('Notes saved')
-
-    # Prompt to update context for next step
-    contexts = await loop.run_in_executor(None, get_select_options, 'Context')
-    new_context = await app.push_screen_wait(
-        SelectModal(
-            f'Context for next step? ({entry.context or "none"})',
-            sorted(contexts),
-            allow_new=True,
-        )
-    )
-
     from gtd.notion.log import _infer_reschedule_days
 
+    next_date = None
     inferred = _infer_reschedule_days(entry.header)
     if inferred:
-        next_date = (datetime.now() + timedelta(days=inferred)).strftime(
+        candidate = (datetime.now() + timedelta(days=inferred)).strftime(
             '%Y-%m-%d'
         )
-    else:
+        question = f'Reschedule "{entry.header.strip()}" to {candidate}?'
+        if await app.push_screen_wait(ConfirmModal(question)):
+            next_date = candidate
+
+    if next_date is None:
         date_str = await app.push_screen_wait(
             InputModal('Reschedule to', 'e.g. tomorrow, Monday, Jul 15')
         )
@@ -862,15 +838,12 @@ async def _shared_log_and_reschedule(
 
     from gtd.notion.client import build_property_update, update_page
 
-    props = build_property_update(follow_up_date=next_date)
-    if new_context:
-        props = {**props, **build_property_update(context=new_context)}
-
+    loop = asyncio.get_running_loop()
     await loop.run_in_executor(
         None,
         update_page,
         entry.page_id,
-        props,
+        build_property_update(follow_up_date=next_date),
     )
     return next_date
 
@@ -1065,9 +1038,7 @@ class BaseEntryContent(Vertical):
                 )
             )
             if choice == 'Reschedule':
-                next_date = await _shared_log_and_reschedule(
-                    self.app, entry, self._notes
-                )
+                next_date = await _shared_reschedule_only(self.app, entry)
                 if next_date:
                     self._remove_entry_and_refocus(entry.page_id)
                     self.app.notify(
@@ -1110,18 +1081,6 @@ class BaseEntryContent(Vertical):
 
         with contextlib.suppress(NotionAPIError):
             update_page(page_id, build_property_update(**props))
-
-    @work
-    async def action_log_and_reschedule(self) -> None:
-        entry = self._current_entry()
-        if not entry:
-            return
-        next_date = await _shared_log_and_reschedule(
-            self.app, entry, self._notes
-        )
-        if next_date:
-            self._update_detail()
-            self.app.notify(f'✓ "{entry.header.strip()}" → {next_date}')
 
     @work
     async def action_drop_entry(self) -> None:
@@ -2241,18 +2200,6 @@ class NextStepsContent(BaseEntryContent):
         self._update_detail()
         self.app.refresh_bindings()
         self.app.notify(f'✓ {item.habit_label} done for this week')
-
-    @work
-    async def action_log(self) -> None:
-        entry = self._current_entry()
-        if not entry:
-            return
-        next_date = await _shared_log_and_reschedule(
-            self.app, entry, self._notes
-        )
-        if next_date:
-            self._remove_entry_and_refocus(entry.page_id)
-            self.app.notify(f'✓ "{entry.header.strip()}" → {next_date}')
 
     async def action_wait_tomorrow(self) -> None:
         entry = self._current_entry()
