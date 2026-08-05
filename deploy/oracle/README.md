@@ -86,3 +86,6 @@ sudo systemctl restart gtd-api
   can make a published release 404 on webapp routes despite the code being
   correct — always confirm a new release actually bundles `webapp/` before
   redeploying.
+- `instance_image_id` is pinned to a specific image OCID rather than looked
+  up dynamically — see the comment in `main.tf` for why (a "latest" lookup
+  would non-deterministically want to replace the running instance).
