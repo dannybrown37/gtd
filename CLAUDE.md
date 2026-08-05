@@ -13,9 +13,10 @@ src/gtd/
 ├── cli.py          # CLI entry point (click group); gtd / gtd fzf / gtd tui / gtd triage / gtd api / etc.
 ├── gtd_tui.py      # Unified Textual TUI — GTDApp (main), all tab content widgets
 ├── tui.py          # Shared Textual widgets: modals, DetailPane, VimListView
-├── api.py          # Flask HTTP wrapper for iOS Shortcuts / mobile access
+├── api.py          # Flask HTTP wrapper for iOS Shortcuts / mobile access; also serves webapp/ as a PWA
 ├── storage.py      # Local JSON I/O for weekly review state and habit dates (~/.local/share/gtd/)
 ├── ui.py           # fzf helpers (fzf_on_a_list), CancelAction
+├── webapp/         # Static PWA frontend (index.html, app.js, styles.css, manifest.json, icons/) served by api.py
 └── notion/
     ├── client.py   # Notion REST API client (httpx)
     ├── commands.py # GTD command implementations (update, defer, snooze, done)
@@ -188,6 +189,23 @@ endpoint, give its Flask view function a one-line docstring — that's what
 lands in the table.
 
 All responses are JSON. Entry objects match `ProjectEntry` fields.
+
+### Webapp (src/gtd/webapp/)
+
+`api.py` also serves a static PWA frontend from `src/gtd/webapp/` — `index.html`, `app.js`,
+`styles.css`, `manifest.json`, `icons/` — via `GET /`, `/app.js`, `/styles.css`,
+`/manifest.json`, `/icons/<filename>`. This is a real browser-facing UI, not just a JSON API;
+"deploying the API" means deploying this too, since they're the same Flask process.
+
+**Packaging gotcha**: `webapp/`'s files are non-`.py` static assets, so `[tool.setuptools.packages.find]`
+in `pyproject.toml` alone does *not* bundle them into the built wheel — that only governs which
+Python packages are included. They must also be listed under `[tool.setuptools.package-data]`
+(`gtd = ["webapp/*", "webapp/icons/*"]`). If a new file type/subdirectory is added under
+`webapp/`, extend that glob too, or `uv tool install "gtd-tui[api]"` from PyPI will install a
+`gtd api` that 404s on the webapp routes despite the code being correct — the routes exist,
+the files they serve don't. This bit us once (webapp/ was committed but never actually shipped
+in any published wheel until this was added) — verify with a local `uv build --wheel` and
+inspect the resulting `.whl` for `gtd/webapp/*` entries before trusting a release ships it.
 
 ## Tooling
 
