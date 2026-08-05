@@ -6,10 +6,14 @@ repos:
   # test hook, by recovering it from git's argv -- the commitizen hook below
   # runs in a separate git invocation and can only ever fail after the suite.
   - repo: https://github.com/dannybrown37/git-a-grip
-    rev: v0.1.0
+    rev: v0.8.1
     hooks:
       - id: commitizen-early
         fail_fast: true
+      - id: ruff-check
+      - id: ruff-format
+      - id: pytest
+        args: ['--runner=uv run --extra api pytest', tests/, -q]
 
   - repo: https://github.com/commitizen-tools/commitizen
     rev: v4.16.5
@@ -43,31 +47,9 @@ repos:
 
   - repo: local
     hooks:
-      - id: ruff-check
-        name: Ruff check
-        entry: ruff check --fix
-        language: system
-        types: [python]
-        pass_filenames: true
-
-      - id: ruff-format
-        name: Ruff format
-        entry: bash -c 'ruff format "$@" && git add "$@"' --
-        language: system
-        types: [python]
-        pass_filenames: true
-        require_serial: true
-
       - id: sync-readme
         name: Sync README menu
         entry: bash -c 'uv run python scripts/update_readme.py && git add README.md'
         language: system
         files: ^(src/gtd/.*\.py|scripts/.*\.py|README\.md)$
-        pass_filenames: false
-
-      - id: tests
-        name: Tests
-        entry: bash -c 'uv run --extra api pytest tests/ -q'
-        language: system
-        files: ^(src/|tests/).*
         pass_filenames: false

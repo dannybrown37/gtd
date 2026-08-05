@@ -249,9 +249,8 @@ src/gtd/
 └── webapp/
     └── icons/
 scripts/
-├── capture_screenshots.py    # Capture SVG screenshots of every GTD TUI tab, for docs/README.
-├── check_commit_msg_early.py # Validate the commit message during the *pre-commit* stage, not commit-msg.
-├── seed_demo_data.py         # Create/reseed a demo GTD Notion database with fake data, for screenshots.
-└── update_readme.py          # Update README.md menu, CLI, tree, and HTTP API sections from source.
+├── capture_screenshots.py # Capture SVG screenshots of every GTD TUI tab, for docs/README.
+├── seed_demo_data.py      # Create/reseed a demo GTD Notion database with fake data, for screenshots.
+└── update_readme.py       # Update README.md menu, CLI, tree, and HTTP API sections from source.
 ```
 <!-- END TREE -->
