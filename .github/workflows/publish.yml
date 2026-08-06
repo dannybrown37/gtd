@@ -37,68 +37,12 @@ jobs:
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
 
-  # Updates the Oracle Cloud VM in place once the new version is on PyPI.
-  # The VM has no public ingress — the runner joins the tailnet as an
-  # ephemeral `tag:ci` node and reaches it over Tailscale SSH, so no SSH
-  # private key is stored in GitHub. Tailnet ACL setup: deploy/oracle/README.md.
+  # Deploys the freshly published version to the Oracle Cloud VM.
+  # Implemented in deploy.yml so it can also be run by hand from the Actions
+  # tab (workflow_dispatch) without cutting a release.
   deploy:
     needs: publish
-    runs-on: ubuntu-latest
-    environment: oci
-    steps:
-      - name: Join tailnet
-        uses: tailscale/github-action@v3
-        with:
-          oauth-client-id: ${{ secrets.TAILSCALE_OAUTH_CLIENT_ID }}
-          oauth-secret: ${{ secrets.TAILSCALE_OAUTH_CLIENT_SECRET }}
-          tags: tag:ci
-
-      - name: Deploy to VM
-        env:
-          # MagicDNS name (or Tailscale IP) of the VM, e.g. "gtd-server".
-          HOST: ${{ vars.GTD_DEPLOY_HOST }}
-        run: |
-          set -euo pipefail
-          VERSION="${GITHUB_REF_NAME#v}"
-          echo "Deploying gtd-tui==$VERSION to $HOST"
-          # Non-interactive SSH doesn't source the login profile, so uv and gtd
-          # are addressed by absolute path rather than relying on PATH.
-          tailscale ssh "ubuntu@$HOST" bash -euo pipefail <<REMOTE
-            UV="\$HOME/.local/bin/uv"
-            # PyPI's CDN can lag the publish job by a few seconds; retry rather
-            # than fail a deploy that would succeed moments later.
-            for attempt in 1 2 3 4 5; do
-              if "\$UV" tool install --force "gtd-tui[api]==$VERSION"; then
-                break
-              fi
-              if [ "\$attempt" = 5 ]; then
-                echo "gtd-tui==$VERSION still not installable after 5 tries" >&2
-                exit 1
-              fi
-              echo "Attempt \$attempt failed; waiting for PyPI to catch up..."
-              sleep 15
-            done
-            sudo systemctl restart gtd-api
-          REMOTE
-
-      - name: Verify service is healthy
-        env:
-          HOST: ${{ vars.GTD_DEPLOY_HOST }}
-        run: |
-          set -euo pipefail
-          VERSION="${GITHUB_REF_NAME#v}"
-          # Restart is async — give the unit a moment before judging it.
-          sleep 5
-          tailscale ssh "ubuntu@$HOST" bash -euo pipefail <<REMOTE
-            if ! systemctl is-active --quiet gtd-api; then
-              echo "gtd-api is not running after deploy:" >&2
-              sudo journalctl -u gtd-api -n 50 --no-pager >&2
-              exit 1
-            fi
-            installed="\$("\$HOME/.local/bin/gtd" --version 2>/dev/null || echo unknown)"
-            echo "gtd-api is active; reports version: \$installed"
-            case "\$installed" in
-              *"$VERSION"*) ;;
-              *) echo "warning: expected $VERSION in '\$installed'" >&2 ;;
-            esac
-          REMOTE
+    uses: ./.github/workflows/deploy.yml
+    secrets: inherit
+    with:
+      version: ${{ github.ref_name }}

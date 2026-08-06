@@ -1,0 +1,126 @@
+name: Deploy to OCI
+
+# Updates the Oracle Cloud VM in place. The VM has no public ingress, so the
+# runner joins the tailnet as an ephemeral `tag:ci` node and connects over
+# Tailscale SSH — no SSH private key is stored in GitHub. Tailnet ACL setup
+# lives in deploy/oracle/README.md.
+#
+# Two entry points:
+#   workflow_call     — invoked by publish.yml after a release reaches PyPI
+#   workflow_dispatch — run by hand from the Actions tab, so the deploy path
+#                       can be tested without cutting a release
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: Exact version to install, e.g. 0.6.1
+        type: string
+        required: true
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to install (blank = whatever is latest on PyPI)
+        type: string
+        required: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: oci
+    steps:
+      - name: Join tailnet
+        uses: tailscale/github-action@v3
+        with:
+          oauth-client-id: ${{ secrets.TAILSCALE_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TAILSCALE_OAUTH_CLIENT_SECRET }}
+          tags: tag:ci
+
+      - name: Check the VM is reachable
+        env:
+          HOST: ${{ vars.GTD_DEPLOY_HOST }}
+        run: |
+          set -euo pipefail
+          if [ -z "${HOST:-}" ]; then
+            echo "GTD_DEPLOY_HOST is not set. It must be the VM's MagicDNS" >&2
+            echo "hostname (e.g. 'gtd4me') — NOT the ACL tag name." >&2
+            exit 1
+          fi
+          echo "Resolving and connecting to $HOST"
+          tailscale status
+          tailscale ssh "ubuntu@$HOST" true
+          echo "Reachable."
+
+      - name: Install release
+        env:
+          HOST: ${{ vars.GTD_DEPLOY_HOST }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          # publish.yml passes the git tag (`v0.6.1`); PyPI wants `0.6.1`.
+          # GitHub expressions can't strip the prefix, so do it here — this
+          # also tolerates a hand-typed version with or without the `v`.
+          VERSION="${VERSION#v}"
+          # A blank version is only possible via workflow_dispatch; it means
+          # "whatever PyPI currently calls latest".
+          if [ -n "$VERSION" ]; then
+            SPEC="gtd-tui[api]==$VERSION"
+          else
+            SPEC="gtd-tui[api]"
+          fi
+          echo "Installing $SPEC on $HOST"
+          # Non-interactive SSH doesn't source the login profile, so uv is
+          # addressed by absolute path rather than relying on PATH.
+          tailscale ssh "ubuntu@$HOST" bash -euo pipefail <<REMOTE
+            UV="\$HOME/.local/bin/uv"
+            if [ ! -x "\$UV" ]; then
+              echo "uv not found at \$UV — was the VM bootstrapped?" >&2
+              exit 1
+            fi
+            # PyPI's CDN can lag the publish job by a few seconds; retry rather
+            # than fail a deploy that would succeed moments later.
+            for attempt in 1 2 3 4 5; do
+              if "\$UV" tool install --force "$SPEC"; then
+                break
+              fi
+              if [ "\$attempt" = 5 ]; then
+                echo "$SPEC still not installable after 5 attempts" >&2
+                exit 1
+              fi
+              echo "Attempt \$attempt failed; waiting for PyPI to catch up..."
+              sleep 15
+            done
+            sudo systemctl restart gtd-api
+          REMOTE
+
+      - name: Verify service is healthy
+        env:
+          HOST: ${{ vars.GTD_DEPLOY_HOST }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          VERSION="${VERSION#v}"
+          # Restart is async — give the unit a moment before judging it.
+          sleep 5
+          tailscale ssh "ubuntu@$HOST" bash -euo pipefail <<REMOTE
+            if ! systemctl is-active --quiet gtd-api; then
+              echo "gtd-api is not running after deploy:" >&2
+              sudo journalctl -u gtd-api -n 50 --no-pager >&2
+              exit 1
+            fi
+            installed="\$("\$HOME/.local/bin/gtd" --version 2>/dev/null || echo unknown)"
+            echo "gtd-api active; \$installed"
+            # The API and the webapp are the same process, so one request
+            # proves both are actually serving, not merely running.
+            code="\$(curl -sS -o /dev/null -w '%{http_code}' http://localhost:8000/ || echo 000)"
+            echo "GET / -> \$code"
+            if [ "\$code" != "200" ]; then
+              sudo journalctl -u gtd-api -n 50 --no-pager >&2
+              exit 1
+            fi
+            if [ -n "$VERSION" ]; then
+              case "\$installed" in
+                *"$VERSION"*) ;;
+                *) echo "warning: expected $VERSION in '\$installed'" >&2 ;;
+              esac
+            fi
+          REMOTE
