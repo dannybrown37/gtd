@@ -519,3 +519,242 @@ class TestEntryPreviewText:
         entry = ProjectEntry.from_page(page)
         result = _entry_preview_text(entry)
         assert expected in result
+
+
+# --- @Person agenda items: no next step / ISO required ---
+
+
+class TestAgendaContexts:
+    """Agenda items (`@Person` contexts) are things to raise with a person.
+
+    They are complete once they have a context and a follow-up/due date --
+    demanding a Next Actionable Step and a Success Condition for "mention
+    the budget to Sam" is busywork, and leaving them blank used to park the
+    item in the inbox forever.
+    """
+
+    @pytest.mark.parametrize(
+        ('context', 'expected'),
+        [
+            ('@Sam', True),
+            ('@', True),
+            ('Work', False),
+            ('', False),
+            (None, False),
+        ],
+    )
+    def test_is_agenda_context(self, context: str | None, expected: bool):
+        from gtd.notion.schema import is_agenda_context
+
+        assert is_agenda_context(context) is expected
+
+    @patch('gtd.notion.triage.query_database')
+    def test_triaged_agenda_item_is_not_inbox(self, mock_db):
+        mock_db.return_value = [
+            _make_triage_page(
+                header='Discuss budget',
+                status='Current Project',
+                context='@Sam',
+                next_step='',
+                success_condition='',
+            ),
+        ]
+        assert get_inbox_entries() == []
+
+    @patch('gtd.notion.triage.query_database')
+    def test_untriaged_agenda_item_is_still_inbox(self, mock_db):
+        """A `@Person` item still in Triage has not been processed yet."""
+        mock_db.return_value = [
+            _make_triage_page(
+                header='Discuss budget',
+                status='Triage',
+                context='@Sam',
+            ),
+        ]
+        assert len(get_inbox_entries()) == 1
+
+    @patch('gtd.notion.triage.query_database')
+    def test_statusless_agenda_item_is_still_inbox(self, mock_db):
+        mock_db.return_value = [
+            _make_triage_page(
+                header='Discuss budget',
+                status='',
+                context='@Sam',
+            ),
+        ]
+        assert len(get_inbox_entries()) == 1
+
+    @patch('gtd.notion.triage.query_database')
+    def test_non_agenda_item_missing_fields_is_still_inbox(self, mock_db):
+        mock_db.return_value = [
+            _make_triage_page(
+                header='Vague thing',
+                status='Current Project',
+                context='Work',
+                next_step='',
+                success_condition='',
+            ),
+        ]
+        assert len(get_inbox_entries()) == 1
+
+    def test_inbox_tab_applies_the_same_exemption(self):
+        """The TUI Inbox tab must agree with the CLI on what is inbox."""
+        from gtd.gtd_tui import InboxContent
+        from gtd.notion.triage import drop_triaged_agenda_items
+
+        assert InboxContent._post_filter is not None  # noqa: SLF001
+        entries = [
+            ProjectEntry.from_page(
+                _make_triage_page(
+                    header='Discuss budget',
+                    status='Current Project',
+                    context='@Sam',
+                )
+            ),
+        ]
+        assert InboxContent._post_filter(None, entries) == (  # noqa: SLF001
+            drop_triaged_agenda_items(entries)
+        )
+        assert InboxContent._post_filter(None, entries) == []  # noqa: SLF001
+
+
+# --- @Person agenda items: the person lives in the header ---
+
+
+class TestAgendaPersonFromHeader:
+    """`@Sam: raise the thing` declares its own context.
+
+    Agenda items are captured by typing the person into the header. The
+    Context select lags behind -- a brand-new person has no option yet, so
+    triage used to ask you to pick a context that didn't exist, for an item
+    that had already named it. The header prefix *is* the context.
+    """
+
+    @pytest.mark.parametrize(
+        ('header', 'expected'),
+        [
+            ('@Sam: raise the budget question', '@Sam'),
+            ('@Sam raise the budget question', '@Sam'),
+            ('@Sam', '@Sam'),
+            ('  @Sam: leading whitespace', '@Sam'),
+            ('Ask @Sam about the thing', None),
+            ('@: nothing after the sigil', None),
+            ('@', None),
+            ('Normal item', None),
+            ('', None),
+        ],
+    )
+    def test_parsing(self, header: str, expected: str | None):
+        from gtd.notion.schema import agenda_person_from_header
+
+        assert agenda_person_from_header(header) == expected
+
+    @patch('gtd.notion.triage.query_database')
+    def test_header_agenda_item_is_not_inbox_once_triaged(self, mock_db):
+        """Context still empty, but the header names the person."""
+        mock_db.return_value = [
+            _make_triage_page(
+                header='@Sam: raise the budget',
+                status='Current Project',
+                context='',
+                next_step='',
+                success_condition='',
+            ),
+        ]
+        assert get_inbox_entries() == []
+
+    @patch('gtd.notion.triage.query_database')
+    def test_header_agenda_item_in_triage_still_appears(self, mock_db):
+        mock_db.return_value = [
+            _make_triage_page(
+                header='@Sam: raise the budget',
+                status='Triage',
+                context='',
+            ),
+        ]
+        assert len(get_inbox_entries()) == 1
+
+    def test_is_agenda_entry_accepts_either_signal(self):
+        from gtd.notion.triage import is_agenda_entry
+
+        by_header = ProjectEntry.from_page(
+            _make_triage_page(header='@Sam: talk', context='')
+        )
+        by_context = ProjectEntry.from_page(
+            _make_triage_page(header='Talk to Sam', context='@Sam')
+        )
+        neither = ProjectEntry.from_page(
+            _make_triage_page(header='Talk to Sam', context='Work')
+        )
+        assert is_agenda_entry(by_header) is True
+        assert is_agenda_entry(by_context) is True
+        assert is_agenda_entry(neither) is False
+
+
+class TestAgendaStatus:
+    """Agenda items are always Current Projects.
+
+    There is no case where "@Sam: raise the budget" is Someday/Maybe or a
+    List, so triage doesn't ask -- the Status prompt was one more keystroke
+    with only one real answer. Dropping an agenda item is still possible via
+    the Inbox tab's `D` binding, which is why removing the prompt (and with
+    it the inline Delete option) doesn't strand anything.
+    """
+
+    def test_agenda_status_is_current_project(self):
+        from gtd.notion.schema import AGENDA_STATUS, STATUSES
+
+        assert AGENDA_STATUS == 'Current Project'
+        assert AGENDA_STATUS in STATUSES
+
+    @patch('gtd.notion.triage.query_database')
+    def test_agenda_item_left_in_triage_still_needs_processing(self, mock_db):
+        """Auto-status only applies during triage, not retroactively."""
+        mock_db.return_value = [
+            _make_triage_page(header='@Sam: talk', status='Triage'),
+        ]
+        assert len(get_inbox_entries()) == 1
+
+
+class TestAgendaItemsAppearInNextSteps:
+    """Agenda items must reach the Next Steps tab without a next_step.
+
+    `_get_today_entries` gates on `context and next_step`, which is exactly
+    the field agenda items are exempt from providing. Exempting them in
+    triage without exempting them here left "@Sam: raise the budget" visible
+    on Projects but invisible on Next Steps -- actionable, and unfindable.
+    """
+
+    @patch('gtd.notion.entries.query_database')
+    def test_agenda_item_shown_without_next_step(self, mock_db):
+        mock_db.return_value = [
+            _make_page(
+                header='@Sam: raise the budget',
+                context='@Sam',
+                next_step='',
+                status='Current Project',
+            ),
+        ]
+        results = _get_today_entries()
+        assert len(results) == 1
+        assert results[0].header == '@Sam: raise the budget'
+
+    @patch('gtd.notion.entries.query_database')
+    def test_agenda_item_shown_from_header_alone(self, mock_db):
+        """Context may still be empty if the item was never triaged."""
+        mock_db.return_value = [
+            _make_page(
+                header='@Sam: raise the budget',
+                context='',
+                next_step='',
+                status='Current Project',
+            ),
+        ]
+        assert len(_get_today_entries()) == 1
+
+    @patch('gtd.notion.entries.query_database')
+    def test_non_agenda_item_still_needs_a_next_step(self, mock_db):
+        mock_db.return_value = [
+            _make_page(header='Vague', context='Work', next_step=''),
+        ]
+        assert _get_today_entries() == []

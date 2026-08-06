@@ -29,7 +29,7 @@ from gtd.notion.client import (
 )
 from gtd.notion.display import format_entry_list
 from gtd.notion.models import ProjectEntry
-from gtd.notion.schema import STATUSES
+from gtd.notion.schema import STATUSES, is_agenda_entry
 from gtd.ui import fzf_on_a_list, prompt_input
 
 
@@ -88,10 +88,15 @@ def _get_today_entries() -> list[ProjectEntry]:
     """Fetch and filter today's actionable entries."""
     pages = query_database(filter_obj=_today_filter())
     entries = [ProjectEntry.from_page(p) for p in pages]
+    # Recurring items and agenda items are described entirely by their
+    # header, so requiring a Next Actionable Step would hide them forever --
+    # they are exempt from providing one during triage.
     return [
         e
         for e in entries
-        if e.status == 'Recurring' or (e.context and e.next_step)
+        if e.status == 'Recurring'
+        or is_agenda_entry(e)
+        or (e.context and e.next_step)
     ]
 
 

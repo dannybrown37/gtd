@@ -18,6 +18,12 @@ from gtd.notion.entries import (
 )
 from gtd.notion.models import ProjectEntry
 from gtd.notion.schema import STATUSES as ALL_STATUSES
+from gtd.notion.schema import (
+    AGENDA_STATUS,
+    agenda_person_from_header,
+    is_agenda_context,
+    is_agenda_entry,
+)
 from gtd.ui import CancelAction, fzf_on_a_list, prompt_input
 
 
@@ -33,6 +39,11 @@ def inbox_filter() -> dict:
     List items are reference material, not actions: they legitimately have
     no context, next step, or ISO, so they only count as inbox when they
     are missing the one field they do need, a List Category.
+
+    Agenda items (`@Person` contexts) are exempt from the next-step/ISO
+    clauses too, but Notion's select filters have no `starts_with`, so that
+    part can't be expressed here -- `drop_triaged_agenda_items` applies it
+    client-side, and every caller of this filter must apply it as well.
     """
     not_a_list = {'property': 'Status', 'select': {'does_not_equal': 'List'}}
     incomplete_fields = [
@@ -64,10 +75,30 @@ def inbox_filter() -> dict:
     }
 
 
+def drop_triaged_agenda_items(
+    entries: list[ProjectEntry],
+) -> list[ProjectEntry]:
+    """Remove already-triaged agenda items from an inbox result set.
+
+    "Mention the budget to Sam" needs no Next Actionable Step and no Success
+    Condition -- the header is the whole action. Without this they match
+    `inbox_filter`'s missing-field clauses forever and never leave the inbox.
+    An agenda item still sitting in Triage (or with no status at all) hasn't
+    been processed yet, so it stays.
+    """
+    return [
+        e
+        for e in entries
+        if not (is_agenda_entry(e) and e.status and e.status != 'Triage')
+    ]
+
+
 def get_inbox_entries() -> list[ProjectEntry]:
     """Fetch items needing triage: no/Triage status, or missing fields."""
     pages = query_database(filter_obj=inbox_filter())
-    return [ProjectEntry.from_page(p) for p in pages]
+    return drop_triaged_agenda_items(
+        [ProjectEntry.from_page(p) for p in pages]
+    )
 
 
 def _process_single_entry(entry: ProjectEntry) -> bool:  # noqa: C901, PLR0911, PLR0912, PLR0915
@@ -75,27 +106,41 @@ def _process_single_entry(entry: ProjectEntry) -> bool:  # noqa: C901, PLR0911, 
     body = get_page_body(entry.page_id)
     preview = _escape_for_shell(_entry_preview_text(entry, body))
 
-    # Status
-    status = fzf_on_a_list(
-        TRIAGE_STATUSES,
-        prompt=f'"{entry.header}" → Status',
-        preview=f"echo '{preview}'",
-    )
-    if not status:
-        return False
+    agenda_person = agenda_person_from_header(entry.header)
 
-    if status == 'Delete':
-        confirm = prompt_input(f'  Delete "{entry.header.strip()}"? (y/N): ')
-        if confirm and confirm.lower() == 'y':
-            archive_page(entry.page_id)
-            print(f'  ✓ "{entry.header.strip()}" deleted')
-            return True
-        print('  Cancelled.')
-        return False
+    # Status -- agenda items are always Current Project, so don't ask.
+    if agenda_person:
+        status = AGENDA_STATUS
+    else:
+        status = fzf_on_a_list(
+            TRIAGE_STATUSES,
+            prompt=f'"{entry.header}" → Status',
+            preview=f"echo '{preview}'",
+        )
+        if not status:
+            return False
+
+        if status == 'Delete':
+            confirm = prompt_input(
+                f'  Delete "{entry.header.strip()}"? (y/N): '
+            )
+            if confirm and confirm.lower() == 'y':
+                archive_page(entry.page_id)
+                print(f'  ✓ "{entry.header.strip()}" deleted')
+                return True
+            print('  Cancelled.')
+            return False
 
     # Context (skip for List items)
     context = None
-    if status != 'List':
+    if status != 'List' and agenda_person:
+        # The header already named the person -- don't ask again. Creating
+        # the select option is idempotent, so a known person is a no-op.
+        from gtd.notion.client import add_context
+
+        add_context(agenda_person)
+        context = agenda_person
+    elif status != 'List':
         from gtd.notion.client import (
             add_context,
             remove_context,
@@ -143,7 +188,7 @@ def _process_single_entry(entry: ProjectEntry) -> bool:  # noqa: C901, PLR0911, 
     # Next Actionable Step
     next_step = None
     success_condition = None
-    if status != 'List':
+    if status != 'List' and not (agenda_person or is_agenda_context(context)):
         if status == 'Waiting For':
             next_step = prompt_input(
                 'Who/what are you waiting on? ',

@@ -102,6 +102,47 @@ With no subcommand, `gtd` launches the Textual TUI — tabs for Next Steps,
 Inbox, Projects, Waiting For, Incubation, Recurring, Someday, and Lists,
 plus a guided Weekly Review. This is the primary interface.
 
+### @Person agendas
+
+Some things aren't tasks — they're things to raise with someone next time you
+talk. Capture them by starting the header with `@Name`:
+
+```
+@Sam: raise the budget question
+```
+
+That prefix is the whole abstraction. Triage recognises it and fills in
+everything it implies, so it asks you **only for a due date and a follow-up
+date**:
+
+| Field | Value | Why |
+|---|---|---|
+| Status | `Current Project` | An agenda item is by definition live |
+| Context | `@Sam` | Taken from the header; the select option is created if new |
+| Next Actionable Step | *(skipped)* | The header already is the action |
+| Success Condition | *(skipped)* | "You said it" — there's nothing else to define |
+
+The colon is optional (`@Sam raise…` works). Only a **leading** `@Name`
+counts — "Ask @Sam about it" is an ordinary item that happens to mention
+someone.
+
+Consequences worth knowing:
+
+- Agenda items appear on **Next Steps** grouped under their person, rendered
+  on one line with the `@Name:` prefix dropped (the group heading already
+  says whose agenda it is). They are exempt from the usual "must have a next
+  step to be actionable" rule.
+- They don't linger in the **Inbox**. Items missing a next step or success
+  condition normally count as untriaged; agenda items are excluded once they
+  have a status.
+- Because triage never shows a Status prompt for them, it never shows the
+  inline *Delete* option either — use `D` on the Inbox tab to drop one.
+- `@Person` contexts are **hidden** in context pickers to keep the list
+  short, since they're assigned automatically. Type `@` in filter mode to
+  reach them.
+- A typo (`@Samm`) becomes a real Context option. Remove it with `-` on the
+  relevant tab or `[- Remove context]` in the picker.
+
 ### CLI subcommands
 
 Each of these also works standalone, e.g. for scripting or quick one-offs

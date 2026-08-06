@@ -40,7 +40,16 @@ from textual.widgets import (
 from textual.widgets._footer import FooterKey, FooterLabel
 
 from gtd.notion.models import ProjectEntry
-from gtd.notion.schema import STATUSES, STATUS_ICONS
+from gtd.notion.schema import (
+    AGENDA_CONTEXT_PREFIX,
+    AGENDA_STATUS,
+    STATUSES,
+    STATUS_ICONS,
+    agenda_person_from_header,
+    is_agenda_context,
+    is_agenda_entry,
+    strip_agenda_person,
+)
 from gtd.tui import (
     ConfirmModal,
     InputModal,
@@ -493,6 +502,12 @@ class NextStepListItem(EntryListItem):
                 due = f'  [yellow]{d:%b %-d}[/yellow]'
         if step:
             return f'[cyan]→[/cyan] {step}\n  [dim]{project}{due}[/dim]'
+        if is_agenda_entry(entry):
+            # An agenda item's header IS its next step -- rendering the
+            # "(no step)" placeholder above it demotes the only real content
+            # to a dim second line. The `@Person` is already the group
+            # heading, so drop it here.
+            return f'[cyan]→[/cyan] {strip_agenda_person(project)}{due}'
         return f'[dim](no step)[/dim]\n  [dim]{project}{due}[/dim]'
 
 
@@ -556,7 +571,12 @@ async def _prompt_and_get_props(
             None, get_select_options, 'Context'
         )
         value = await app.push_screen_wait(
-            SelectModal('Context', sorted(contexts), allow_new=True)
+            SelectModal(
+                'Context',
+                sorted(contexts),
+                allow_new=True,
+                hidden_prefix=AGENDA_CONTEXT_PREFIX,
+            )
         )
         props = {'context': value} if value else None
     elif choice == 'Steps':
@@ -902,13 +922,22 @@ class BaseEntryContent(Vertical):
     def _build_filter(self) -> dict:
         raise NotImplementedError
 
+    def _post_filter(self, entries: list[ProjectEntry]) -> list[ProjectEntry]:
+        """Narrow the fetched entries further, client-side.
+
+        For predicates Notion's filter language can't express.
+        """
+        return entries
+
     @work(thread=True)
     def _load_entries(self) -> None:
         from gtd.notion.client import query_database
 
         try:
             pages = query_database(filter_obj=self._build_filter())
-            entries = [ProjectEntry.from_page(p) for p in pages]
+            entries = self._post_filter(
+                [ProjectEntry.from_page(p) for p in pages]
+            )
             self.app.call_from_thread(self._set_entries, entries)
         except Exception as e:
             msg = f'Notion error: {e}'
@@ -2318,10 +2347,16 @@ class NextStepsContent(BaseEntryContent):
         kwargs: dict = {}
 
         needs_status = not entry.status or entry.status == 'Triage'
+        agenda_person = agenda_person_from_header(entry.header)
 
         if entry.status == 'List' and entry.context:
             return True
-        if needs_status:
+        if needs_status and agenda_person:
+            # Agenda items are always Current Project -- don't ask. `D` on the
+            # Inbox tab drops one you don't want.
+            status = AGENDA_STATUS
+            kwargs['status'] = status
+        elif needs_status:
             status = await self.app.push_screen_wait(
                 SelectModal(f'Triage: {title}', TRIAGE_STATUSES)
             )
@@ -2377,7 +2412,16 @@ class NextStepsContent(BaseEntryContent):
 
         subtitle = title
 
-        if not entry.context:
+        if not entry.context and status != 'List' and agenda_person:
+            # "@Sam: raise the budget" already names its context -- don't ask
+            # for one. add_context is idempotent, so a known person is a no-op.
+            from gtd.notion.client import add_context
+
+            await asyncio.get_running_loop().run_in_executor(
+                None, add_context, agenda_person
+            )
+            kwargs['context'] = agenda_person
+        elif not entry.context:
             if status == 'List':
                 from gtd.notion.client import get_list_categories
 
@@ -2418,6 +2462,7 @@ class NextStepsContent(BaseEntryContent):
                                 '[- Remove context]',
                             ],
                             allow_new=False,
+                            hidden_prefix=AGENDA_CONTEXT_PREFIX,
                         )
                     )
                     if context is None:
@@ -2463,36 +2508,42 @@ class NextStepsContent(BaseEntryContent):
             self.app.notify(f'✓ "{title}" → List [{cat}]')
             return True
 
-        if not entry.next_step:
-            if status == 'Waiting For':
-                next_step = await self.app.push_screen_wait(
+        # Agenda items (@Person) are complete with a context and a date --
+        # the header is the whole action, so skip both prompts.
+        is_agenda = agenda_person is not None or is_agenda_context(
+            kwargs.get('context', entry.context)
+        )
+        if not is_agenda:
+            if not entry.next_step:
+                if status == 'Waiting For':
+                    next_step = await self.app.push_screen_wait(
+                        InputModal(
+                            'Who/what are you waiting on?',
+                            title,
+                            subtitle=subtitle,
+                        )
+                    )
+                    if next_step is None:
+                        return None
+                    if next_step:
+                        kwargs['next_step'] = next_step
+                else:
+                    val = await _open_steps_editor(self.app)
+                    if val:
+                        kwargs['next_step'] = val
+
+            if not entry.success_condition:
+                success_condition = await self.app.push_screen_wait(
                     InputModal(
-                        'Who/what are you waiting on?',
-                        title,
+                        'Success condition',
+                        'What does done look like?',
                         subtitle=subtitle,
                     )
                 )
-                if next_step is None:
+                if success_condition is None:
                     return None
-                if next_step:
-                    kwargs['next_step'] = next_step
-            else:
-                val = await _open_steps_editor(self.app)
-                if val:
-                    kwargs['next_step'] = val
-
-        if not entry.success_condition:
-            success_condition = await self.app.push_screen_wait(
-                InputModal(
-                    'Success condition',
-                    'What does done look like?',
-                    subtitle=subtitle,
-                )
-            )
-            if success_condition is None:
-                return None
-            if success_condition:
-                kwargs['success_condition'] = success_condition
+                if success_condition:
+                    kwargs['success_condition'] = success_condition
 
         if not entry.due_date and status != 'Recurring':
             due_str = await self.app.push_screen_wait(
@@ -2681,6 +2732,11 @@ class InboxContent(BaseEntryContent):
 
         return inbox_filter()
 
+    def _post_filter(self, entries: list[ProjectEntry]) -> list[ProjectEntry]:
+        from gtd.notion.triage import drop_triaged_agenda_items
+
+        return drop_triaged_agenda_items(entries)
+
     def seed_entries(self, entries: list[ProjectEntry]) -> None:
         """Pre-populate entries (e.g. from weekly review flow)."""
         self._entries = entries
@@ -2731,10 +2787,16 @@ class InboxContent(BaseEntryContent):
         kwargs: dict = {}
 
         needs_status = not entry.status or entry.status == 'Triage'
+        agenda_person = agenda_person_from_header(entry.header)
 
         if entry.status == 'List' and entry.context:
             return True
-        if needs_status:
+        if needs_status and agenda_person:
+            # Agenda items are always Current Project -- don't ask. `D` on the
+            # Inbox tab drops one you don't want.
+            status = AGENDA_STATUS
+            kwargs['status'] = status
+        elif needs_status:
             status = await self.app.push_screen_wait(
                 SelectModal(f'Triage: {title}', TRIAGE_STATUSES)
             )
@@ -2790,7 +2852,16 @@ class InboxContent(BaseEntryContent):
 
         subtitle = title
 
-        if not entry.context:
+        if not entry.context and status != 'List' and agenda_person:
+            # "@Sam: raise the budget" already names its context -- don't ask
+            # for one. add_context is idempotent, so a known person is a no-op.
+            from gtd.notion.client import add_context
+
+            await asyncio.get_running_loop().run_in_executor(
+                None, add_context, agenda_person
+            )
+            kwargs['context'] = agenda_person
+        elif not entry.context:
             if status == 'List':
                 from gtd.notion.client import get_list_categories
 
@@ -2831,6 +2902,7 @@ class InboxContent(BaseEntryContent):
                                 '[- Remove context]',
                             ],
                             allow_new=False,
+                            hidden_prefix=AGENDA_CONTEXT_PREFIX,
                         )
                     )
                     if context is None:
@@ -2876,36 +2948,42 @@ class InboxContent(BaseEntryContent):
             self.app.notify(f'✓ "{title}" → List [{cat}]')
             return True
 
-        if not entry.next_step:
-            if status == 'Waiting For':
-                next_step = await self.app.push_screen_wait(
+        # Agenda items (@Person) are complete with a context and a date --
+        # the header is the whole action, so skip both prompts.
+        is_agenda = agenda_person is not None or is_agenda_context(
+            kwargs.get('context', entry.context)
+        )
+        if not is_agenda:
+            if not entry.next_step:
+                if status == 'Waiting For':
+                    next_step = await self.app.push_screen_wait(
+                        InputModal(
+                            'Who/what are you waiting on?',
+                            title,
+                            subtitle=subtitle,
+                        )
+                    )
+                    if next_step is None:
+                        return None
+                    if next_step:
+                        kwargs['next_step'] = next_step
+                else:
+                    val = await _open_steps_editor(self.app)
+                    if val:
+                        kwargs['next_step'] = val
+
+            if not entry.success_condition:
+                success_condition = await self.app.push_screen_wait(
                     InputModal(
-                        'Who/what are you waiting on?',
-                        title,
+                        'Success condition',
+                        'What does done look like?',
                         subtitle=subtitle,
                     )
                 )
-                if next_step is None:
+                if success_condition is None:
                     return None
-                if next_step:
-                    kwargs['next_step'] = next_step
-            else:
-                val = await _open_steps_editor(self.app)
-                if val:
-                    kwargs['next_step'] = val
-
-        if not entry.success_condition:
-            success_condition = await self.app.push_screen_wait(
-                InputModal(
-                    'Success condition',
-                    'What does done look like?',
-                    subtitle=subtitle,
-                )
-            )
-            if success_condition is None:
-                return None
-            if success_condition:
-                kwargs['success_condition'] = success_condition
+                if success_condition:
+                    kwargs['success_condition'] = success_condition
 
         if not entry.due_date and status != 'Recurring':
             due_str = await self.app.push_screen_wait(
@@ -3728,7 +3806,12 @@ class ListsContent(BaseEntryContent):
                 None, get_select_options, 'Context'
             )
             value = await self.app.push_screen_wait(
-                SelectModal('Context', sorted(contexts), allow_new=True)
+                SelectModal(
+                    'Context',
+                    sorted(contexts),
+                    allow_new=True,
+                    hidden_prefix=AGENDA_CONTEXT_PREFIX,
+                )
             )
             if not value:
                 return

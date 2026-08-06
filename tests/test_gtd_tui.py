@@ -21,6 +21,7 @@ from textual.widgets import (
 import gtd.gtd_tui
 import gtd.tui
 from gtd.gtd_tui import (
+    NextStepListItem,
     BaseEntryContent,
     GTDApp,
     ListsContent,
@@ -1269,3 +1270,114 @@ class TestNoDeadRescheduleActions:
                 assert action in bound, (
                     f'{widget.__name__}.action_{action} has no binding'
                 )
+
+
+class TestSelectModalHiddenPrefix:
+    """`@Person` contexts stay out of the way until you ask for them.
+
+    Agenda contexts accumulate one per person and sort to the very top
+    (`@` is ASCII 64, below `A`), burying the handful of contexts actually
+    picked by hand. Triage derives them from the header anyway, so they only
+    need to be reachable, not visible.
+    """
+
+    @staticmethod
+    def _labels(*keys: str) -> list[str]:
+        async def run() -> list[str]:
+            app = _TabHost(Static(''))
+            async with app.run_test() as pilot:
+                app.push_screen(
+                    SelectModal(
+                        'Context',
+                        ['@Chris', '@Kim', 'Home', 'Work'],
+                        hidden_prefix='@',
+                    )
+                )
+                await pilot.pause()
+                if keys:
+                    await pilot.press(*keys)
+                for _ in range(4):
+                    await pilot.pause()
+                lv = app.screen.query_one('#select-list', ListView)
+                return [
+                    str(i.query_one(Label).content) for i in lv.query(ListItem)
+                ]
+
+        return asyncio.run(run())
+
+    def test_agenda_contexts_hidden_by_default(self):
+        assert self._labels() == ['Home', 'Work']
+
+    def test_typing_the_sigil_reveals_them(self):
+        assert self._labels('tab', '@') == ['@Chris', '@Kim']
+
+    def test_typing_a_person_reveals_that_person(self):
+        assert self._labels('tab', '@', 'c') == ['@Chris']
+
+    def test_ordinary_filtering_still_excludes_them(self):
+        assert self._labels('tab', 'o') == ['Home', 'Work']
+
+
+class TestAgendaRowRendering:
+    """An agenda item's header IS its next step -- render it as one.
+
+    `NextStepListItem` treats a missing next step as a defect: it prints a
+    dim `(no step)` as the primary line and demotes the real content to the
+    dim secondary line. Agenda items have no next step by design, so they
+    rendered as a placeholder above their own text. They get the same
+    `→` treatment as a real step, on one line, with the `@Person:` prefix
+    dropped -- the group heading above already says whose agenda it is.
+    """
+
+    @staticmethod
+    def _entry(**kw) -> ProjectEntry:
+        defaults = {
+            'page_id': 'p1',
+            'header': '@Sam: raise the budget',
+            'status': 'Current Project',
+            'context': '@Sam',
+            'next_step': '',
+            'success_condition': '',
+            'due_date': None,
+            'follow_up_date': None,
+            'list_category': None,
+            'area': None,
+            'created_date': None,
+        }
+        return ProjectEntry(**{**defaults, **kw})
+
+    def test_agenda_row_is_one_line_with_an_arrow(self):
+        out = NextStepListItem._format(self._entry())  # noqa: SLF001
+        assert out == '[cyan]→[/cyan] raise the budget'
+        assert '(no step)' not in out
+        assert '\n' not in out
+
+    def test_person_prefix_dropped_without_colon_too(self):
+        out = NextStepListItem._format(  # noqa: SLF001
+            self._entry(header='@Sam raise the budget')
+        )
+        assert out == '[cyan]→[/cyan] raise the budget'
+
+    def test_bare_person_header_keeps_the_person(self):
+        """Stripping must never leave an empty label."""
+        out = NextStepListItem._format(self._entry(header='@Sam'))  # noqa: SLF001
+        assert out == '[cyan]→[/cyan] @Sam'
+
+    def test_agenda_row_keeps_its_due_date(self):
+        out = NextStepListItem._format(  # noqa: SLF001
+            self._entry(due_date='2026-08-09')
+        )
+        assert '[yellow]Aug 9[/yellow]' in out
+
+    def test_agenda_item_with_a_real_step_renders_normally(self):
+        out = NextStepListItem._format(  # noqa: SLF001
+            self._entry(next_step='Email him')
+        )
+        assert out.startswith('[cyan]→[/cyan] Email him')
+        assert '@Sam: raise the budget' in out
+
+    def test_non_agenda_item_still_shows_no_step(self):
+        out = NextStepListItem._format(  # noqa: SLF001
+            self._entry(header='Vague thing', context='Work')
+        )
+        assert '(no step)' in out

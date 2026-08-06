@@ -65,6 +65,37 @@ The header count and its "nothing actionable 🎉" empty state describe the GTD 
 
 **Triage context for "List" status** uses `get_list_categories()` (`notion/client.py`), which reads the `List Category` select options from Notion — the same source as the Lists tab, not Notion's Context options. The CLI triage flow (`notion/triage.py`) reads the same function.
 
+### @Person agendas
+
+A header starting with `@Name` (`@Sam: raise the budget`) declares an *agenda item* — something to raise with a person, not a task. See the README's "@Person agendas" section for the user-facing contract; this is what maintaining it requires.
+
+**The four primitives, all in `notion/schema.py`** (not `triage.py` — `triage.py` imports `entries.py`, so anything `entries.py` needs would cycle):
+
+| | |
+|---|---|
+| `agenda_person_from_header(header)` | Leading `@token` → `'@Sam'`; colon optional/stripped; bare `@` rejected. Only a *leading* token counts. |
+| `is_agenda_context(context)` | The Context select option starts with `@`. |
+| `is_agenda_entry(entry)` | Either signal. **Prefer this** — duck-typed on `.header`/`.context`. |
+| `strip_agenda_person(header)` | Drops the prefix for display. Never returns empty. |
+| `AGENDA_STATUS` | `'Current Project'`. |
+| `AGENDA_CONTEXT_PREFIX` | `'@'`. |
+
+**Why the header, not the Context, is the source of truth**: capture writes the person into the *title*, so the Context select always lags — a brand-new person has no option yet. Keying only off Context meant triage prompted for a context that didn't exist for an item that had already named it. Triage now derives it and calls `add_context()` (idempotent) to create the option silently.
+
+**Exempting agenda items from a field means fixing every consumer that requires it.** This bit twice — the pattern to watch for:
+
+- `inbox_filter()` counts an empty next step / success condition as "needs triage" → agenda items never leave the Inbox. Notion select filters have no `starts_with`, so this **cannot** be expressed server-side; `drop_triaged_agenda_items()` applies it client-side, and **every caller of `inbox_filter()` must too** (`get_inbox_entries()`, `InboxContent._post_filter()`). Items still in Triage/statusless are deliberately kept.
+- `_get_today_entries()` (`notion/entries.py`) gates on `context and next_step` → agenda items showed on Projects but not Next Steps. `is_agenda_entry` is now an escape hatch there alongside `Recurring`, which exists for the identical reason.
+- `NextStepListItem._format` printed a dim `(no step)` placeholder above the real content. Agenda rows now render single-line with `→` and the person stripped.
+
+**`_triage_one` is duplicated verbatim in `gtd_tui.py`** (~2394 and ~2836) and mirrored a third time by `_process_single_entry` in `notion/triage.py`. Patch all three or the Inbox tab, the weekly review, and the CLI diverge.
+
+Skipping the Status prompt also removed the inline *Delete* option for agenda items; `D` on the Inbox tab is the remaining exit.
+
+**`SelectModal(..., hidden_prefix='@')`** (`tui.py`) keeps `@Person` contexts out of the browse list until the query contains `@`; the placeholder advertises it. Applied to the context pickers (triage + update), deliberately **not** to `action_filter_context` — filtering to "everything for one person" is a real use, and that list only contains contexts present in the current view.
+
+`BaseEntryContent._post_filter(entries)` is the general hook for narrowing fetched entries client-side, for predicates Notion's filter language can't express. Default is identity; only `InboxContent` overrides it.
+
 ### Waiting For tab (Weekly Review)
 
 `WaitingForBrowseScreen` — browse Waiting For items during the Weekly Review step. Actions:

@@ -215,34 +215,50 @@ class SelectModal(ModalScreen[str | None]):
         items: list[str],
         *,
         allow_new: bool = False,
+        hidden_prefix: str | None = None,
     ) -> None:
         super().__init__()
         self._title = title
         self._all_items = items
-        self._filtered = list(items)
         self._allow_new = allow_new
+        self._hidden_prefix = hidden_prefix
+        self._filtered = self._matching('')
+
+    def _matching(self, query: str) -> list[str]:
+        """Items matching `query`, minus any hidden-prefix ones.
+
+        `hidden_prefix` keeps a long tail of options (`@Person` contexts) out
+        of the browse list without making them unreachable: type the prefix
+        and they appear. They are only withheld while the query lacks it.
+        """
+        items = [i for i in self._all_items if query.lower() in i.lower()]
+        if self._hidden_prefix and self._hidden_prefix not in query:
+            items = [i for i in items if not i.startswith(self._hidden_prefix)]
+        return items
 
     def compose(self) -> ComposeResult:
+        placeholder = 'tab → filter'
+        if self._hidden_prefix:
+            placeholder += f'  ·  {self._hidden_prefix} → people'
         with Vertical(classes='modal-box'):
             yield Label(self._title, classes='modal-title')
-            yield Input(placeholder='tab → filter', id='filter-input')
+            yield Input(placeholder=placeholder, id='filter-input')
             yield ListView(
-                *[ListItem(Label(item)) for item in self._all_items],
+                *[ListItem(Label(item)) for item in self._filtered],
                 id='select-list',
             )
             yield Static('', id='new-hint')
 
     def on_mount(self) -> None:
         lv = self.query_one('#select-list', ListView)
-        if self._all_items:
+        if self._filtered:
             lv.index = 0
         lv.focus()
         self.query_one('#new-hint', Static).display = False
 
     @on(Input.Changed, '#filter-input')
     async def filter_changed(self, event: Input.Changed) -> None:
-        query = event.value.lower()
-        self._filtered = [i for i in self._all_items if query in i.lower()]
+        self._filtered = self._matching(event.value)
         lv = self.query_one('#select-list', ListView)
         hint = self.query_one('#new-hint', Static)
         await repopulate(
