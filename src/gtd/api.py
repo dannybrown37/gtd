@@ -5,7 +5,7 @@ from __future__ import annotations
 from http import HTTPStatus
 import os
 from dataclasses import asdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from functools import wraps
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
@@ -24,11 +24,14 @@ from gtd.notion.client import (
     build_property_update,
     get_contexts,
     get_list_categories,
+    get_page_body,
     query_database,
+    replace_page_body,
     update_page,
     archive_page,
 )
 from gtd.notion.models import ProjectEntry
+from gtd.notion.schema import STATUSES
 from gtd.notion.triage import TRIAGE_STATUSES
 
 import logging
@@ -117,6 +120,39 @@ def _get_page_by_id(page_id: str) -> dict | None:
     except Exception:
         print(f'Failed to retrieve page {page_id}, response: {response.text}')
     return None
+
+
+def _entry_response(page_id: str) -> tuple[Any, int]:
+    """Fetch a page and render it as an entry dict, or an error tuple."""
+    page = _get_page_by_id(page_id)
+    if not page:
+        return jsonify(error=f'Entry {page_id} not found'), 404
+    return jsonify(_entry_dict(ProjectEntry.from_page(page))), 200
+
+
+# The subset of ProjectEntry fields a client may write, mapped to the
+# `build_property_update` keyword that sets them. Anything outside this map is
+# rejected rather than ignored, so a typo surfaces as a 400 instead of a
+# silently skipped update.
+WRITABLE_FIELDS = {
+    'header': 'name',
+    'status': 'status',
+    'context': 'context',
+    'list_category': 'list_category',
+    'area': 'area',
+    'next_step': 'next_step',
+    'success_condition': 'success_condition',
+    'due_date': 'due_date',
+    'follow_up_date': 'follow_up_date',
+}
+
+
+def _parse_iso_date(value: str) -> str | None:
+    """Return `value` as an ISO date string, or None if unparseable."""
+    try:
+        return dateparser.parse(value).date().isoformat()
+    except (ValueError, OverflowError, TypeError):
+        return None
 
 
 # endregion Utils
@@ -290,6 +326,129 @@ def inbox() -> Any:
     return jsonify([_entry_dict(e) for e in entries])
 
 
+@app.get('/entries')
+@require_auth
+def entries() -> Any:
+    """List entries by status, backing the webapp's per-status tabs.
+
+    Query params: `status` (required), `context`, and `follow_up` — `future`
+    selects deferred items (the Incubation tab), `due` selects everything
+    actionable now.
+    """
+    status = request.args.get('status')
+    if not status:
+        return jsonify(error='status query parameter is required'), 400
+    status = unquote_plus(status)
+    if status not in STATUSES:
+        return jsonify(
+            error=f'Invalid status "{status}". Valid: {", ".join(STATUSES)}',
+        ), 400
+
+    pages = query_database(
+        filter_obj={'property': 'Status', 'select': {'equals': status}},
+    )
+    found = [ProjectEntry.from_page(p) for p in pages]
+
+    follow_up = request.args.get('follow_up')
+    if follow_up in {'future', 'due'}:
+        today_str = _get_timezone_iso_date()
+        if follow_up == 'future':
+            found = [
+                e
+                for e in found
+                if e.follow_up_date and e.follow_up_date > today_str
+            ]
+        else:
+            found = [
+                e
+                for e in found
+                if not e.follow_up_date or e.follow_up_date <= today_str
+            ]
+
+    context = request.args.get('context')
+    if context:
+        context = unquote_plus(context)
+        found = [e for e in found if e.context == context]
+
+    found.sort(key=lambda e: (e.due_date or '9999-99-99', e.header.lower()))
+    return jsonify([_entry_dict(e) for e in found])
+
+
+@app.patch('/entry/<page_id>')
+@require_auth
+def patch_entry(page_id: str) -> Any:
+    """Update any subset of an entry's fields. Mirrors the TUI's `U`."""
+    body = request.get_json(force=True, silent=True) or {}
+    unknown = set(body) - set(WRITABLE_FIELDS)
+    if unknown:
+        return jsonify(
+            error=f'Unknown field(s): {", ".join(sorted(unknown))}',
+        ), 400
+    if not body:
+        return jsonify(error='No fields to update'), 400
+
+    kwargs = {WRITABLE_FIELDS[k]: v for k, v in body.items()}
+    props = build_property_update(**kwargs)
+    try:
+        update_page(page_id, props)
+    except (ValueError, RuntimeError, OSError) as err:
+        return jsonify(error=f'Update failed: {err}'), 500
+    return _entry_response(page_id)
+
+
+@app.get('/entry/<page_id>/notes')
+@require_auth
+def get_notes(page_id: str) -> Any:
+    """Read an entry's page body. Mirrors the TUI's `N`."""
+    try:
+        return jsonify(notes=get_page_body(page_id))
+    except (ValueError, RuntimeError, OSError) as err:
+        return jsonify(error=f'Could not read notes: {err}'), 500
+
+
+@app.put('/entry/<page_id>/notes')
+@require_auth
+def put_notes(page_id: str) -> Any:
+    """Replace an entry's page body. Body: {"notes": "..."}."""
+    body = request.get_json(force=True, silent=True) or {}
+    if 'notes' not in body:
+        # An empty string is a legitimate erase; an absent key is a bug.
+        return jsonify(error='notes is required'), 400
+    try:
+        replace_page_body(page_id, body['notes'])
+    except (ValueError, RuntimeError, OSError) as err:
+        return jsonify(error=f'Could not save notes: {err}'), 500
+    return jsonify(saved=True), 200
+
+
+@app.post('/entry/<page_id>/snooze')
+@require_auth
+def snooze(page_id: str) -> Any:
+    """Push an entry's follow-up date out. Mirrors the TUI's `T`.
+
+    Body may carry `date` (explicit ISO date) or `days` (offset from today);
+    with neither, it defers to tomorrow.
+    """
+    body = request.get_json(force=True, silent=True) or {}
+    if 'date' in body:
+        target = _parse_iso_date(str(body['date']))
+        if not target:
+            return jsonify(error=f'Unparseable date: {body["date"]}'), 400
+    else:
+        try:
+            days = int(body.get('days', 1))
+        except (TypeError, ValueError):
+            return jsonify(error='days must be an integer'), 400
+        today = datetime.fromisoformat(_get_timezone_iso_date()).date()
+        target = (today + timedelta(days=days)).isoformat()
+
+    try:
+        update_page(page_id, build_property_update(follow_up_date=target))
+    except (ValueError, RuntimeError, OSError) as err:
+        return jsonify(error=f'Snooze failed: {err}'), 500
+    return _entry_response(page_id)
+
+
 @app.post('/capture')
 @require_auth
 def capture() -> Any:
@@ -457,10 +616,28 @@ def get_list(category: str) -> Any:
 @app.post('/done/<page_id>')
 @require_auth
 def done(page_id: str) -> Any:
-    """Mark an entry done (archives the page)."""
+    """Mark an entry done (archives the page).
+
+    Body may carry `reschedule` (an ISO date), which sets the next follow-up
+    instead of archiving — how a Recurring item is completed without losing it.
+    """
     page_data = _get_page_by_id(page_id)
     if not page_data:
         return jsonify(error=f'Entry {page_id} not found'), 404
+
+    body = request.get_json(force=True, silent=True) or {}
+    if body.get('reschedule'):
+        target = _parse_iso_date(str(body['reschedule']))
+        if not target:
+            return jsonify(
+                error=f'Unparseable date: {body["reschedule"]}',
+            ), 400
+        try:
+            update_page(page_id, build_property_update(follow_up_date=target))
+        except (ValueError, RuntimeError, OSError) as err:
+            return jsonify(error=f'Reschedule failed: {err}'), 500
+        return jsonify(rescheduled=target), 200
+
     try:
         archive_page(page_id)
     except (ValueError, RuntimeError, OSError) as err:

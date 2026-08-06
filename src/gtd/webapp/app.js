@@ -1,28 +1,74 @@
 const KEY_STORAGE = 'gtd_api_key';
 
+// Capabilities this webapp implements, keyed to the TUI action names they
+// mirror. tests/test_webapp_parity.py reads this array and fails when the TUI
+// grows an action with no counterpart here — the two UIs are meant to stay
+// feature-equivalent, not merely similar. Add to this list only when the
+// behaviour actually exists below.
+const CAPABILITIES = [
+  'update_entry',
+  'edit_notes',
+  'edit_steps',
+  'wait_tomorrow',
+  'mark_done',
+  'drop_entry',
+  'triage_entry',
+  'triage_all',
+  'filter_context',
+  'filter_list',
+  'move_someday',
+  'move_to_list',
+  'activate',
+  'capture',
+  'refresh',
+];
+
+// Each view is a tab in the TUI. `status`/`followUp` drive the generic
+// /entries endpoint; `kind` selects the loader for the ones that differ.
+const VIEWS = {
+  'next-steps':  { label: 'Next Steps',    kind: 'next-steps' },
+  'inbox':       { label: 'Inbox',         kind: 'inbox' },
+  'capture':     { label: 'Capture',       kind: 'capture' },
+  'projects':    { label: 'Projects',      kind: 'entries', status: 'Current Project' },
+  'waiting-for': { label: 'Waiting For',   kind: 'entries', status: 'Waiting For' },
+  'incubation':  { label: 'Incubation',    kind: 'entries', status: 'Current Project', followUp: 'future' },
+  'recurring':   { label: 'Recurring',     kind: 'entries', status: 'Recurring' },
+  'someday':     { label: 'Someday/Maybe', kind: 'entries', status: 'Someday/Maybe' },
+  'lists':       { label: 'Lists',         kind: 'lists' },
+};
+
+const UPDATE_FIELDS = [
+  ['header', 'Title'],
+  ['status', 'Status'],
+  ['context', 'Context'],
+  ['area', 'Area'],
+  ['list_category', 'List Category'],
+  ['next_step', 'Next Step'],
+  ['success_condition', 'Success Condition'],
+  ['due_date', 'Due Date'],
+  ['follow_up_date', 'Follow-up Date'],
+];
+
+const DATE_FIELDS = new Set(['due_date', 'follow_up_date']);
+
 const state = {
   apiKey: localStorage.getItem(KEY_STORAGE) || '',
   activeView: 'next-steps',
   currentContext: '',
+  currentCategory: '',
   schema: null,
-  triage: null, // { entry, status, context, list_category, next_step, success_condition, due_date, follow_up_date }
+  entries: [],
 };
 
 const $ = (sel) => document.querySelector(sel);
 const modalBackdrop = $('#modal-backdrop');
 const modal = $('#modal');
+const navMenu = $('#nav-menu');
 
 function showToast(message, isError) {
   const el = document.createElement('div');
   el.textContent = message;
-  el.style.cssText = [
-    'position:fixed', 'left:50%', 'bottom:88px', 'transform:translateX(-50%)',
-    'background:' + (isError ? '#f87171' : '#1e293b'),
-    'color:' + (isError ? '#0f172a' : '#e2e8f0'),
-    'border:1px solid ' + (isError ? '#f87171' : '#334155'),
-    'padding:10px 16px', 'border-radius:10px', 'font-size:0.85rem',
-    'z-index:50', 'max-width:85vw', 'text-align:center',
-  ].join(';');
+  el.className = 'toast' + (isError ? ' toast-error' : '');
   document.body.appendChild(el);
   setTimeout(() => el.remove(), 2600);
 }
@@ -41,6 +87,31 @@ modalBackdrop.addEventListener('click', (e) => {
   if (e.target === modalBackdrop && state.apiKey) closeModal();
 });
 
+function escapeHtml(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function formatDate(iso) {
+  if (!iso) return '';
+  const [, m, d] = iso.split('-');
+  return `${m}/${d}`;
+}
+
+function todayISO() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function addDaysISO(days) {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
 async function apiFetch(path, options = {}) {
   const headers = Object.assign({}, options.headers, {
     Authorization: `Bearer ${state.apiKey}`,
@@ -53,10 +124,12 @@ async function apiFetch(path, options = {}) {
     throw new Error('unauthorized');
   }
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    throw new Error(data.error || `Request failed (${res.status})`);
-  }
+  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
   return data;
+}
+
+function reportError(err) {
+  if (err.message !== 'unauthorized') showToast(err.message, true);
 }
 
 // region Settings / API key
@@ -74,9 +147,7 @@ function openSettingsModal() {
   `);
   const input = $('#api-key-input');
   input.focus();
-  if (canCancel) {
-    $('#settings-cancel').addEventListener('click', closeModal);
-  }
+  if (canCancel) $('#settings-cancel').addEventListener('click', closeModal);
   $('#settings-save').addEventListener('click', async () => {
     const value = input.value.trim();
     if (!value) {
@@ -102,109 +173,512 @@ $('#settings-btn').addEventListener('click', openSettingsModal);
 
 // endregion
 
-// region Tabs
+// region Navigation
 
-document.querySelectorAll('.tab').forEach((btn) => {
-  btn.addEventListener('click', () => switchView(btn.dataset.view));
+function buildNavMenu() {
+  navMenu.innerHTML = Object.entries(VIEWS)
+    .map(([id, v]) => {
+      const active = id === state.activeView ? ' active' : '';
+      return `<button class="nav-item${active}" data-view="${id}">${escapeHtml(v.label)}</button>`;
+    })
+    .join('');
+  navMenu.querySelectorAll('.nav-item').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      closeNav();
+      switchView(btn.dataset.view);
+    });
+  });
+}
+
+function openNav() {
+  buildNavMenu();
+  navMenu.classList.remove('hidden');
+}
+
+function closeNav() {
+  navMenu.classList.add('hidden');
+}
+
+$('#nav-btn').addEventListener('click', () => {
+  if (navMenu.classList.contains('hidden')) openNav();
+  else closeNav();
 });
 
 function switchView(view) {
   state.activeView = view;
-  document.querySelectorAll('.tab').forEach((btn) => {
-    btn.classList.toggle('active', btn.dataset.view === view);
-  });
-  document.querySelectorAll('.view').forEach((section) => {
-    section.classList.toggle('hidden', section.id !== `view-${view}`);
-  });
+  state.currentContext = '';
+  state.currentCategory = '';
+  $('#view-title').textContent = VIEWS[view].label;
+  const isCapture = VIEWS[view].kind === 'capture';
+  $('#view-capture').classList.toggle('hidden', !isCapture);
+  $('#view-list').classList.toggle('hidden', isCapture);
   loadActiveView();
-}
-
-function loadActiveView() {
-  if (!state.apiKey) return;
-  if (state.activeView === 'next-steps') loadNextSteps();
-  if (state.activeView === 'inbox') loadInbox();
 }
 
 // endregion
 
-// region Next Steps
+// region List rendering
 
-async function loadContextChips() {
-  const container = $('#context-chips');
+function setEmpty(message) {
+  const empty = $('#list-empty');
+  empty.textContent = message;
+  empty.classList.toggle('hidden', !message);
+}
+
+function renderEntries(entries, { onTap }) {
+  const list = $('#entry-list');
+  list.innerHTML = '';
+  entries.forEach((entry) => {
+    const li = document.createElement('li');
+    li.className = 'entry';
+    li.dataset.pageId = entry.page_id;
+    const bits = [
+      entry.context,
+      entry.area,
+      entry.due_date && `due ${formatDate(entry.due_date)}`,
+      entry.follow_up_date && `→ ${formatDate(entry.follow_up_date)}`,
+    ].filter(Boolean);
+    li.innerHTML = `
+      <div class="entry-main">
+        <div class="entry-header">${escapeHtml(entry.header)}</div>
+        ${entry.next_step ? `<div class="entry-sub">${escapeHtml(entry.next_step)}</div>` : ''}
+        ${bits.length ? `<div class="entry-meta">${escapeHtml(bits.join(' · '))}</div>` : ''}
+      </div>
+      <span class="chevron" aria-hidden="true">›</span>
+    `;
+    li.addEventListener('click', () => onTap(entry, li));
+    list.appendChild(li);
+  });
+}
+
+function removeEntryRow(pageId) {
+  const li = $(`#entry-list [data-page-id="${pageId}"]`);
+  if (li) li.remove();
+  state.entries = state.entries.filter((e) => e.page_id !== pageId);
+  if (!$('#entry-list').children.length) setEmpty('Nothing here 🎉');
+}
+
+function renderChips(values, current, onPick) {
+  const container = $('#chips');
+  container.classList.remove('hidden');
+  container.innerHTML = values
+    .map((v) => {
+      const active = v.value === current ? ' active' : '';
+      return `<button class="chip${active}" data-value="${escapeHtml(v.value)}">${escapeHtml(v.label)}</button>`;
+    })
+    .join('');
+  container.querySelectorAll('.chip').forEach((chip) => {
+    chip.addEventListener('click', () => onPick(chip.dataset.value));
+  });
+}
+
+// endregion
+
+// region Loaders
+
+function loadActiveView() {
+  if (!state.apiKey) return;
+  const view = VIEWS[state.activeView];
+  $('#chips').classList.add('hidden');
+  setEmpty('');
+  if (view.kind === 'capture') return;
+  if (view.kind === 'next-steps') return loadNextSteps();
+  if (view.kind === 'inbox') return loadInbox();
+  if (view.kind === 'lists') return loadLists();
+  return loadEntries(view);
+}
+
+async function loadNextSteps() {
   try {
     const { contexts } = await apiFetch('/contexts');
-    const all = ['All', ...contexts];
-    container.innerHTML = all
-      .map((c) => {
-        const value = c === 'All' ? '' : c;
-        const active = value === state.currentContext ? 'active' : '';
-        return `<button class="chip ${active}" data-context="${value}">${c}</button>`;
-      })
-      .join('');
-    container.querySelectorAll('.chip').forEach((chip) => {
-      chip.addEventListener('click', () => {
-        state.currentContext = chip.dataset.context;
-        container.querySelectorAll('.chip').forEach((c) => c.classList.remove('active'));
-        chip.classList.add('active');
-        loadNextSteps(false);
-      });
-    });
+    renderChips(
+      [{ value: '', label: 'All' }, ...contexts.map((c) => ({ value: c, label: c }))],
+      state.currentContext,
+      (value) => {
+        state.currentContext = value;
+        loadNextSteps();
+      }
+    );
   } catch (err) {
-    // chips are a nicety; ignore failures here, main list fetch will surface errors
+    // Chips are a nicety; the list fetch below surfaces real failures.
   }
-}
-
-function formatDate(iso) {
-  if (!iso) return '';
-  const [y, m, d] = iso.split('-');
-  return `${m}/${d}`;
-}
-
-async function loadNextSteps(refreshChips = true) {
-  if (refreshChips) await loadContextChips();
-  const list = $('#next-steps-list');
-  const empty = $('#next-steps-empty');
   try {
     const path = state.currentContext
       ? `/next-steps?context=${encodeURIComponent(state.currentContext)}`
       : '/next-steps';
-    const entries = await apiFetch(path);
-    list.innerHTML = '';
-    empty.classList.toggle('hidden', entries.length > 0);
-    entries.forEach((entry) => list.appendChild(renderNextStepItem(entry)));
+    state.entries = await apiFetch(path);
+    renderEntries(state.entries, { onTap: openActionSheet });
+    setEmpty(state.entries.length ? '' : 'Nothing actionable 🎉');
   } catch (err) {
-    if (err.message !== 'unauthorized') showToast(err.message, true);
+    reportError(err);
   }
 }
 
-function renderNextStepItem(entry) {
-  const li = document.createElement('li');
-  li.className = 'entry';
-  const meta = [entry.context, formatDate(entry.due_date) && `due ${formatDate(entry.due_date)}`]
-    .filter(Boolean)
-    .join(' · ');
-  li.innerHTML = `
-    <div class="entry-main">
-      <div class="entry-header">${escapeHtml(entry.header)}</div>
-      ${entry.next_step ? `<div class="entry-sub">${escapeHtml(entry.next_step)}</div>` : ''}
-      ${meta ? `<div class="entry-meta">${escapeHtml(meta)}</div>` : ''}
-    </div>
-    <button class="done-btn" aria-label="Mark done">✓</button>
-  `;
-  li.querySelector('.done-btn').addEventListener('click', () => markDone(entry.page_id, li));
-  return li;
-}
-
-async function markDone(pageId, li) {
+async function loadEntries(view) {
+  const params = new URLSearchParams({ status: view.status });
+  if (view.followUp) params.set('follow_up', view.followUp);
   try {
-    await apiFetch(`/done/${pageId}`, { method: 'POST' });
-    li.remove();
-    showToast('Done ✓');
-    const list = $('#next-steps-list');
-    $('#next-steps-empty').classList.toggle('hidden', list.children.length > 0);
+    state.entries = await apiFetch(`/entries?${params}`);
+    renderEntries(state.entries, { onTap: openActionSheet });
+    setEmpty(state.entries.length ? '' : 'Nothing here 🎉');
   } catch (err) {
-    if (err.message !== 'unauthorized') showToast(err.message, true);
+    reportError(err);
   }
+}
+
+async function loadInbox() {
+  try {
+    state.entries = await apiFetch('/inbox');
+    renderEntries(state.entries, { onTap: openTriageModal });
+    setEmpty(state.entries.length ? '' : 'Inbox is empty 🎉');
+  } catch (err) {
+    reportError(err);
+  }
+}
+
+async function loadLists() {
+  let categories;
+  try {
+    ({ list_categories: categories } = await apiFetch('/list-categories'));
+  } catch (err) {
+    reportError(err);
+    return;
+  }
+  if (!categories.length) {
+    setEmpty('No list categories defined');
+    return;
+  }
+  if (!state.currentCategory) state.currentCategory = categories[0];
+  renderChips(
+    categories.map((c) => ({ value: c, label: c })),
+    state.currentCategory,
+    (value) => {
+      state.currentCategory = value;
+      loadLists();
+    }
+  );
+  try {
+    const path = `/list/${encodeURIComponent(state.currentCategory)}`;
+    state.entries = await apiFetch(path);
+    renderEntries(state.entries, { onTap: openActionSheet });
+    setEmpty(state.entries.length ? '' : 'Nothing in this list');
+  } catch (err) {
+    reportError(err);
+  }
+}
+
+// endregion
+
+// region Action sheet
+
+function openActionSheet(entry) {
+  const isRecurring = entry.status === 'Recurring';
+  const isSomeday = entry.status === 'Someday/Maybe';
+  const isList = state.activeView === 'lists';
+  openModal(`
+    <h2>${escapeHtml(entry.header)}</h2>
+    ${entry.next_step ? `<p class="entry-meta">${escapeHtml(entry.next_step)}</p>` : ''}
+    <div class="action-stack">
+      <button class="action-btn" data-act="update">Update a field</button>
+      <button class="action-btn" data-act="steps">Edit next step</button>
+      <button class="action-btn" data-act="notes">Notes</button>
+      <button class="action-btn" data-act="snooze">Snooze</button>
+      ${isSomeday ? '<button class="action-btn" data-act="activate">Activate</button>' : ''}
+      ${!isSomeday && !isList ? '<button class="action-btn" data-act="someday">Move to Someday</button>' : ''}
+      <button class="action-btn" data-act="list">Move to a List</button>
+      <button class="action-btn primary-action" data-act="done">${isRecurring ? 'Done (reschedule)' : 'Done'}</button>
+      <button class="action-btn danger-action" data-act="drop">Drop</button>
+    </div>
+    <div class="modal-actions">
+      <button class="secondary-btn" id="sheet-cancel">Cancel</button>
+    </div>
+  `);
+  $('#sheet-cancel').addEventListener('click', closeModal);
+  modal.querySelectorAll('.action-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const act = btn.dataset.act;
+      if (act === 'update') openUpdateFieldPicker(entry);
+      if (act === 'steps') openStepsModal(entry);
+      if (act === 'notes') openNotesModal(entry);
+      if (act === 'snooze') openSnoozeModal(entry);
+      if (act === 'activate') setStatus(entry, 'Current Project');
+      if (act === 'someday') setStatus(entry, 'Someday/Maybe');
+      if (act === 'list') openMoveToListModal(entry);
+      if (act === 'done') isRecurring ? openRescheduleModal(entry) : markDone(entry);
+      if (act === 'drop') confirmDrop(entry);
+    });
+  });
+}
+
+async function patchEntry(entry, body, successMessage) {
+  try {
+    await apiFetch(`/entry/${entry.page_id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    });
+    closeModal();
+    showToast(successMessage);
+    loadActiveView();
+  } catch (err) {
+    reportError(err);
+  }
+}
+
+function setStatus(entry, status) {
+  patchEntry(entry, { status }, `Moved to ${status}`);
+}
+
+async function ensureSchema() {
+  if (!state.schema) state.schema = await apiFetch('/triage-schema');
+  return state.schema;
+}
+
+function openUpdateFieldPicker(entry) {
+  openModal(`
+    <h2>Update</h2>
+    <div class="action-stack">
+      ${UPDATE_FIELDS.map(
+        ([key, label]) =>
+          `<button class="action-btn" data-field="${key}">${label}</button>`
+      ).join('')}
+    </div>
+    <div class="modal-actions">
+      <button class="secondary-btn" id="field-cancel">Cancel</button>
+    </div>
+  `);
+  $('#field-cancel').addEventListener('click', () => openActionSheet(entry));
+  modal.querySelectorAll('[data-field]').forEach((btn) => {
+    btn.addEventListener('click', () => openFieldEditor(entry, btn.dataset.field));
+  });
+}
+
+async function openFieldEditor(entry, field) {
+  const label = UPDATE_FIELDS.find(([k]) => k === field)[1];
+  const current = entry[field] || '';
+
+  // Select-backed fields get option buttons rather than free text, so the
+  // webapp can't invent values the Notion schema doesn't have.
+  let options = null;
+  if (field === 'status' || field === 'context' || field === 'list_category') {
+    try {
+      const schema = await ensureSchema();
+      if (field === 'status') options = schema.statuses;
+      if (field === 'context') options = schema.contexts_by_status['Current Project'];
+      if (field === 'list_category') options = schema.list_categories;
+    } catch (err) {
+      reportError(err);
+      return;
+    }
+  }
+
+  const inputType = DATE_FIELDS.has(field) ? 'date' : 'text';
+  openModal(`
+    <h2>${label}</h2>
+    ${
+      options
+        ? `<div class="option-grid" id="field-options">${options
+            .map(
+              (o) =>
+                `<button type="button" class="option-btn${o === current ? ' active' : ''}" data-value="${escapeHtml(o)}">${escapeHtml(o)}</button>`
+            )
+            .join('')}</div>`
+        : `<input id="field-input" type="${inputType}" value="${escapeHtml(current)}" />`
+    }
+    <div class="modal-actions">
+      <button class="secondary-btn" id="field-back">Back</button>
+      ${options ? '' : '<button class="primary-btn" id="field-save">Save</button>'}
+    </div>
+  `);
+  $('#field-back').addEventListener('click', () => openUpdateFieldPicker(entry));
+  if (options) {
+    modal.querySelectorAll('.option-btn').forEach((btn) => {
+      btn.addEventListener('click', () =>
+        patchEntry(entry, { [field]: btn.dataset.value }, `${label} updated`)
+      );
+    });
+  } else {
+    $('#field-input').focus();
+    $('#field-save').addEventListener('click', () =>
+      patchEntry(entry, { [field]: $('#field-input').value }, `${label} updated`)
+    );
+  }
+}
+
+function openStepsModal(entry) {
+  openModal(`
+    <h2>Next step</h2>
+    <textarea id="steps-input" placeholder="What's the next action?">${escapeHtml(entry.next_step || '')}</textarea>
+    <div class="modal-actions">
+      <button class="secondary-btn" id="steps-back">Back</button>
+      <button class="primary-btn" id="steps-save">Save</button>
+    </div>
+  `);
+  $('#steps-back').addEventListener('click', () => openActionSheet(entry));
+  $('#steps-save').addEventListener('click', () =>
+    patchEntry(entry, { next_step: $('#steps-input').value }, 'Step updated')
+  );
+}
+
+async function openNotesModal(entry) {
+  let notes = '';
+  try {
+    ({ notes } = await apiFetch(`/entry/${entry.page_id}/notes`));
+  } catch (err) {
+    reportError(err);
+    return;
+  }
+  openModal(`
+    <h2>Notes</h2>
+    <textarea id="notes-input" class="notes-area">${escapeHtml(notes)}</textarea>
+    <div class="modal-actions">
+      <button class="secondary-btn" id="notes-back">Back</button>
+      <button class="primary-btn" id="notes-save">Save</button>
+    </div>
+  `);
+  $('#notes-back').addEventListener('click', () => openActionSheet(entry));
+  $('#notes-save').addEventListener('click', async () => {
+    try {
+      await apiFetch(`/entry/${entry.page_id}/notes`, {
+        method: 'PUT',
+        body: JSON.stringify({ notes: $('#notes-input').value }),
+      });
+      closeModal();
+      showToast('Notes saved');
+    } catch (err) {
+      reportError(err);
+    }
+  });
+}
+
+function openSnoozeModal(entry) {
+  openModal(`
+    <h2>Snooze</h2>
+    <div class="action-stack">
+      <button class="action-btn" data-days="1">Tomorrow</button>
+      <button class="action-btn" data-days="3">In 3 days</button>
+      <button class="action-btn" data-days="7">Next week</button>
+    </div>
+    <label for="snooze-date">Or pick a date</label>
+    <input id="snooze-date" type="date" value="${todayISO()}" />
+    <div class="modal-actions">
+      <button class="secondary-btn" id="snooze-back">Back</button>
+      <button class="primary-btn" id="snooze-save">Save</button>
+    </div>
+  `);
+  $('#snooze-back').addEventListener('click', () => openActionSheet(entry));
+  const send = async (body) => {
+    try {
+      await apiFetch(`/entry/${entry.page_id}/snooze`, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      });
+      closeModal();
+      showToast('Snoozed');
+      loadActiveView();
+    } catch (err) {
+      reportError(err);
+    }
+  };
+  modal.querySelectorAll('[data-days]').forEach((btn) => {
+    btn.addEventListener('click', () => send({ days: Number(btn.dataset.days) }));
+  });
+  $('#snooze-save').addEventListener('click', () => send({ date: $('#snooze-date').value }));
+}
+
+async function openMoveToListModal(entry) {
+  let categories;
+  try {
+    ({ list_categories: categories } = await apiFetch('/list-categories'));
+  } catch (err) {
+    reportError(err);
+    return;
+  }
+  openModal(`
+    <h2>Move to a List</h2>
+    <div class="option-grid">
+      ${categories
+        .map(
+          (c) =>
+            `<button type="button" class="option-btn" data-value="${escapeHtml(c)}">${escapeHtml(c)}</button>`
+        )
+        .join('')}
+    </div>
+    <div class="modal-actions">
+      <button class="secondary-btn" id="movelist-back">Back</button>
+    </div>
+  `);
+  $('#movelist-back').addEventListener('click', () => openActionSheet(entry));
+  modal.querySelectorAll('.option-btn').forEach((btn) => {
+    btn.addEventListener('click', () =>
+      patchEntry(
+        entry,
+        { status: 'List', list_category: btn.dataset.value },
+        'Moved to list'
+      )
+    );
+  });
+}
+
+function openRescheduleModal(entry) {
+  openModal(`
+    <h2>${escapeHtml(entry.header)}</h2>
+    <p class="entry-meta">Recurring — reschedule it, or finish it for good.</p>
+    <div class="action-stack">
+      <button class="action-btn" data-days="1">Tomorrow</button>
+      <button class="action-btn" data-days="7">Next week</button>
+    </div>
+    <label for="resched-date">Or pick a date</label>
+    <input id="resched-date" type="date" value="${addDaysISO(1)}" />
+    <div class="modal-actions">
+      <button class="secondary-btn" id="resched-back">Back</button>
+      <button class="primary-btn" id="resched-save">Reschedule</button>
+    </div>
+    <button class="action-btn danger-action" id="resched-complete">Complete permanently</button>
+  `);
+  $('#resched-back').addEventListener('click', () => openActionSheet(entry));
+  const send = async (date) => {
+    try {
+      await apiFetch(`/done/${entry.page_id}`, {
+        method: 'POST',
+        body: JSON.stringify({ reschedule: date }),
+      });
+      closeModal();
+      showToast('Rescheduled');
+      loadActiveView();
+    } catch (err) {
+      reportError(err);
+    }
+  };
+  modal.querySelectorAll('[data-days]').forEach((btn) => {
+    btn.addEventListener('click', () => send(addDaysISO(Number(btn.dataset.days))));
+  });
+  $('#resched-save').addEventListener('click', () => send($('#resched-date').value));
+  $('#resched-complete').addEventListener('click', () => markDone(entry));
+}
+
+async function markDone(entry) {
+  try {
+    await apiFetch(`/done/${entry.page_id}`, { method: 'POST' });
+    closeModal();
+    removeEntryRow(entry.page_id);
+    showToast('Done ✓');
+  } catch (err) {
+    reportError(err);
+  }
+}
+
+function confirmDrop(entry) {
+  openModal(`
+    <h2>Drop this?</h2>
+    <p class="entry-meta">${escapeHtml(entry.header)}</p>
+    <p class="entry-meta">It will be archived in Notion.</p>
+    <div class="modal-actions">
+      <button class="secondary-btn" id="drop-cancel">Cancel</button>
+      <button class="primary-btn danger-action" id="drop-confirm">Drop</button>
+    </div>
+  `);
+  $('#drop-cancel').addEventListener('click', () => openActionSheet(entry));
+  $('#drop-confirm').addEventListener('click', () => markDone(entry));
 }
 
 // endregion
@@ -234,49 +708,17 @@ $('#capture-form').addEventListener('submit', async (e) => {
 
 // region Inbox / Triage
 
-async function loadInbox() {
-  const list = $('#inbox-list');
-  const empty = $('#inbox-empty');
-  try {
-    const entries = await apiFetch('/inbox');
-    list.innerHTML = '';
-    empty.classList.toggle('hidden', entries.length > 0);
-    entries.forEach((entry) => list.appendChild(renderInboxItem(entry)));
-  } catch (err) {
-    if (err.message !== 'unauthorized') showToast(err.message, true);
-  }
-}
-
-function renderInboxItem(entry) {
-  const li = document.createElement('li');
-  li.className = 'entry';
-  li.dataset.pageId = entry.page_id;
-  li.innerHTML = `
-    <div class="entry-main">
-      <div class="entry-header">${escapeHtml(entry.header)}</div>
-      ${entry.due_date ? `<div class="entry-meta">due ${formatDate(entry.due_date)}</div>` : ''}
-    </div>
-  `;
-  li.addEventListener('click', () => openTriageModal(entry));
-  return li;
-}
-
-async function ensureSchema() {
-  if (!state.schema) {
-    state.schema = await apiFetch('/triage-schema');
-  }
-  return state.schema;
-}
+let triageState = null;
 
 async function openTriageModal(entry) {
   let schema;
   try {
     schema = await ensureSchema();
   } catch (err) {
-    if (err.message !== 'unauthorized') showToast(err.message, true);
+    reportError(err);
     return;
   }
-  state.triage = {
+  triageState = {
     entry,
     status: '',
     context: '',
@@ -293,17 +735,16 @@ function optionGrid(name, options, selected) {
   return `<div class="option-grid" data-field="${name}">${options
     .map(
       (o) =>
-        `<button type="button" class="option-btn ${o === selected ? 'active' : ''}" data-value="${escapeHtml(o)}">${escapeHtml(o)}</button>`
+        `<button type="button" class="option-btn${o === selected ? ' active' : ''}" data-value="${escapeHtml(o)}">${escapeHtml(o)}</button>`
     )
     .join('')}</div>`;
 }
 
 function renderTriageModal(schema) {
-  const t = state.triage;
+  const t = triageState;
   const isDelete = t.status === 'Delete';
   const isList = t.status === 'List';
   const showContext = t.status && !isDelete && !isList;
-  const showListCategory = isList;
   const showRest = t.status && !isDelete;
 
   openModal(`
@@ -317,7 +758,7 @@ function renderTriageModal(schema) {
         <label>Context</label>
         ${optionGrid('context', schema.contexts_by_status[t.status] || [], t.context)}
       </div>` : ''}
-    ${showListCategory ? `
+    ${isList ? `
       <div>
         <label>List Category</label>
         ${optionGrid('list_category', schema.list_categories, t.list_category)}
@@ -372,7 +813,7 @@ function renderTriageModal(schema) {
 }
 
 async function saveTriage() {
-  const t = state.triage;
+  const t = triageState;
   if (!t.status) {
     showToast('Choose a status', true);
     return;
@@ -401,32 +842,18 @@ async function saveTriage() {
     });
     closeModal();
     showToast('Triaged ✓');
-    const list = $('#inbox-list');
-    const li = list.querySelector(`[data-page-id="${t.entry.page_id}"]`);
-    if (li) li.remove();
-    $('#inbox-empty').classList.toggle('hidden', list.children.length > 0);
+    removeEntryRow(t.entry.page_id);
   } catch (err) {
-    if (err.message !== 'unauthorized') showToast(err.message, true);
+    reportError(err);
   }
 }
 
 // endregion
 
-function escapeHtml(str) {
-  if (!str) return '';
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
-
 // region Init
 
-if (!state.apiKey) {
-  openSettingsModal();
-} else {
-  loadActiveView();
-}
+buildNavMenu();
+if (!state.apiKey) openSettingsModal();
+else loadActiveView();
 
 // endregion

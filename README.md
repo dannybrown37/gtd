@@ -230,6 +230,11 @@ your own token.
 | `POST` | `/capture` | Add an item to the inbox. Body: {"header": "..."}. |
 | `GET` | `/contexts` | Get active contexts. |
 | `POST` | `/done/<page_id>` | Mark an entry done (archives the page). |
+| `GET` | `/entries` | List entries by status, backing the webapp's per-status tabs. |
+| `PATCH` | `/entry/<page_id>` | Update any subset of an entry's fields. Mirrors the TUI's `U`. |
+| `GET` | `/entry/<page_id>/notes` | Read an entry's page body. Mirrors the TUI's `N`. |
+| `PUT` | `/entry/<page_id>/notes` | Replace an entry's page body. Body: {"notes": "..."}. |
+| `POST` | `/entry/<page_id>/snooze` | Push an entry's follow-up date out. Mirrors the TUI's `T`. |
 | `GET` | `/icons/<path:filename>` | Serve the web app's PWA icons. |
 | `GET` | `/inbox` | Get all Triage entries (inbox). |
 | `GET` | `/list-categories` | Return canonical list categories from Notion (for debugging/UI use). |

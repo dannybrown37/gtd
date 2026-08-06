@@ -230,6 +230,32 @@ All responses are JSON. Entry objects match `ProjectEntry` fields.
 `/manifest.json`, `/icons/<filename>`. This is a real browser-facing UI, not just a JSON API;
 "deploying the API" means deploying this too, since they're the same Flask process.
 
+**The webapp and the TUI must stay feature-equivalent.** They're two front ends over the
+same Notion data; the UIs differ (thumbs vs. keys) but the *capability set* must not. A
+feature added to either one belongs in the other **in the same change**.
+
+`tests/test_webapp_parity.py` enforces this, and is deliberately asymmetric because a
+symmetric check is worthless:
+
+- The **TUI side is derived** — it walks the real `BINDINGS` on `GTDApp` and the content
+  widgets, so a new binding is noticed with zero bookkeeping.
+- The **webapp side is declared** — the `CAPABILITIES` array at the top of `app.js`.
+
+So the failure that actually happens (add a TUI key, forget the webapp) fails CI. Two
+hand-maintained lists compared to each other would drift together and always pass — don't
+"simplify" it into that.
+
+When you add a TUI binding, either implement it in the webapp and add its action name to
+`CAPABILITIES`, or add it to `TUI_ONLY` in the test **with a reason**. `TUI_ONLY` is for
+things that genuinely can't cross (keyboard navigation, `quit`) and for deliberately
+deferred scope — currently the Weekly Review, Area CRUD, and List-category CRUD, all of
+which the TUI has and the webapp does not.
+
+Webapp structure: `VIEWS` in `app.js` maps one entry per TUI tab; a single generic list
+view renders them all, backed by `GET /entries?status=…`. Per-entry actions live in an
+action sheet (`openActionSheet`) rather than a keymap. Navigation is a full-screen
+hamburger menu — eight tabs can't hold a 44px touch target in a bottom bar.
+
 **Packaging gotcha**: `webapp/`'s files are non-`.py` static assets, so `[tool.setuptools.packages.find]`
 in `pyproject.toml` alone does *not* bundle them into the built wheel — that only governs which
 Python packages are included. They must also be listed under `[tool.setuptools.package-data]`

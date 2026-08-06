@@ -45,6 +45,16 @@ body {
   font-size: 1.1rem;
   margin: 0;
   letter-spacing: 0.02em;
+  flex: 1;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.icon-btn {
+  min-width: 44px;
+  min-height: 44px;
 }
 
 .icon-btn {
@@ -63,7 +73,9 @@ body {
   overflow-y: auto;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
-  padding: 12px 12px 16px;
+  /* Nothing sits below #views any more, so it owns the bottom safe-area
+     inset — otherwise the last entry hides under the home indicator. */
+  padding: 12px 12px calc(16px + env(safe-area-inset-bottom));
 }
 
 .view.hidden { display: none; }
@@ -137,21 +149,72 @@ body {
   margin-top: 4px;
 }
 
-.done-btn {
+.chevron {
   flex: none;
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  border: 1px solid var(--accent);
-  background: transparent;
-  color: var(--accent);
-  font-size: 1.1rem;
+  color: var(--text-dim);
+  font-size: 1.3rem;
   line-height: 1;
 }
 
-.done-btn:active {
-  background: var(--accent);
+/* Action sheet: one full-width tappable row per action, so the whole
+   per-entry keymap from the TUI is reachable with a thumb. */
+.action-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.action-btn {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text);
+  text-align: left;
+  min-height: 48px;
+  padding: 12px 14px;
+  font-size: 0.95rem;
+}
+
+.action-btn.primary-action {
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.action-btn.danger-action,
+.primary-btn.danger-action {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.primary-btn.danger-action {
+  background: transparent;
+}
+
+.notes-area {
+  min-height: 180px;
+}
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(24px + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  padding: 10px 16px;
+  border-radius: 10px;
+  font-size: 0.85rem;
+  z-index: 50;
+  max-width: 85vw;
+  text-align: center;
+}
+
+.toast-error {
+  background: var(--danger);
   color: #0f172a;
+  border-color: var(--danger);
 }
 
 .empty {
@@ -200,25 +263,37 @@ button[type=submit], .primary-btn {
   min-height: 1.2em;
 }
 
-.tabbar {
-  flex: none;
+/* Full-screen view switcher. Covers the content area but not the topbar, so
+   the same button that opened it is still there to close it. */
+.nav-menu {
+  position: fixed;
+  inset: 0;
+  top: calc(52px + env(safe-area-inset-top));
+  background: var(--bg);
+  z-index: 20;
   display: flex;
-  border-top: 1px solid var(--border);
+  flex-direction: column;
+  padding: 8px 12px calc(12px + env(safe-area-inset-bottom));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.nav-menu.hidden { display: none; }
+
+.nav-item {
   background: var(--surface);
-  padding-bottom: env(safe-area-inset-bottom);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  color: var(--text);
+  text-align: left;
+  min-height: 52px;
+  padding: 14px 16px;
+  font-size: 1rem;
+  margin-bottom: 8px;
 }
 
-.tab {
-  flex: 1;
-  background: none;
-  border: none;
-  color: var(--text-dim);
-  min-height: 44px;
-  padding: 12px 4px;
-  font-size: 0.85rem;
-}
-
-.tab.active {
+.nav-item.active {
+  border-color: var(--accent);
   color: var(--accent);
   font-weight: 600;
 }

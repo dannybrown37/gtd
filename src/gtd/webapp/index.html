@@ -15,15 +15,18 @@
 </head>
 <body>
 <header class="topbar">
-  <h1>GTD</h1>
+  <button id="nav-btn" class="icon-btn" aria-label="Menu">☰</button>
+  <h1 id="view-title">Next Steps</h1>
   <button id="settings-btn" class="icon-btn" aria-label="Settings">⚙</button>
 </header>
 
 <main id="views">
-  <section id="view-next-steps" class="view">
-    <div id="context-chips" class="chips"></div>
-    <ul id="next-steps-list" class="entry-list"></ul>
-    <p id="next-steps-empty" class="empty hidden">Nothing actionable 🎉</p>
+  <!-- One generic list view serves every entry tab; the chip row doubles as
+       the context filter (Next Steps) and the category picker (Lists). -->
+  <section id="view-list" class="view">
+    <div id="chips" class="chips hidden"></div>
+    <ul id="entry-list" class="entry-list"></ul>
+    <p id="list-empty" class="empty hidden"></p>
   </section>
 
   <section id="view-capture" class="view hidden">
@@ -33,18 +36,11 @@
     </form>
     <p id="capture-status" class="status"></p>
   </section>
-
-  <section id="view-inbox" class="view hidden">
-    <ul id="inbox-list" class="entry-list"></ul>
-    <p id="inbox-empty" class="empty hidden">Inbox is empty 🎉</p>
-  </section>
 </main>
 
-<nav class="tabbar">
-  <button class="tab active" data-view="next-steps">Next Steps</button>
-  <button class="tab" data-view="capture">Capture</button>
-  <button class="tab" data-view="inbox">Inbox</button>
-</nav>
+<!-- Full-screen navigation. Eight tabs will not fit a bottom bar at a 44px
+     touch target, so view switching lives here instead. -->
+<nav id="nav-menu" class="nav-menu hidden" aria-label="Views"></nav>
 
 <div id="modal-backdrop" class="modal-backdrop hidden">
   <div id="modal" class="modal"></div>
