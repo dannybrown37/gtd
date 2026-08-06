@@ -69,10 +69,106 @@ should serve the webapp (you'll be prompted once per browser/device for the
 
 ## Updating
 
+Once [auto-deploy](#auto-deploy-from-github-actions) is set up, pushing a
+release to `main` updates the VM on its own. To update by hand:
+
 ```bash
 uv tool install --force "gtd-tui[api]"
 sudo systemctl restart gtd-api
 ```
+
+## Auto-deploy from GitHub Actions
+
+`publish.yml`'s `deploy` job updates this VM automatically after each PyPI
+release. The VM has no public ingress, so the runner joins your tailnet as an
+**ephemeral `tag:ci` node** and connects over **Tailscale SSH** — no SSH
+private key is stored in GitHub, and the only secret is a Tailscale OAuth
+client scoped to minting `tag:ci` auth keys.
+
+Deploys are triggered by the `v*` tag that `commitizen` pushes, **not** by
+every push to `main`. A `chore:`/`docs:`-only push produces no version bump,
+so no tag, so no deploy — that's expected, not a failure.
+
+### One-time setup
+
+**1. Policy file** — edit your tailnet policy file at
+<https://login.tailscale.com/admin/acls/file> (a web textarea in the admin
+console — nothing in this repo, and nothing on the VM). Merge the blocks below
+into the corresponding top-level keys you already have; don't replace the
+document.
+
+Do this first: `tag:ci` won't be selectable when creating the OAuth client
+until it exists in `tagOwners`, and step 2's `--advertise-tags` will be
+rejected until `tag:gtd-server` does too.
+
+```jsonc
+{
+  // Both tags must be declared before anything can use them.
+  "tagOwners": {
+    "tag:ci":         ["autogroup:admin"],
+    "tag:gtd-server": ["autogroup:admin"],
+  },
+
+  // Restrict what CI may reach. Without this, a tagged node can talk to
+  // anything your other ACLs allow — the point is that a compromised
+  // workflow gets one box on one port, not the tailnet.
+  "grants": [
+    {
+      "src": ["tag:ci"],
+      "dst": ["tag:gtd-server"],
+      "ip":  ["tcp:22"],
+    },
+  ],
+
+  // Permit Tailscale SSH from CI to the deploy user. This is what removes
+  // the need for an SSH private key in GitHub — auth is the node's tailnet
+  // identity. `accept` (not `check`) is required: `check` prompts for
+  // browser re-auth, which a CI runner cannot satisfy.
+  "ssh": [
+    {
+      "action": "accept",
+      "src":    ["tag:ci"],
+      "dst":    ["tag:gtd-server"],
+      "users":  ["ubuntu"],
+    },
+  ],
+}
+```
+
+**2. Tag the VM.** If it joined via a plain `sudo tailscale up`, it's owned by
+your user account and the ACLs above won't match it. Re-auth it as a tagged
+node with Tailscale SSH enabled:
+
+```bash
+sudo tailscale up --advertise-tags=tag:gtd-server --ssh
+```
+
+Note that tagged nodes don't expire, but they also lose their user
+association — that's intended.
+
+**3. OAuth client** — in the admin console, create one with **Keys → Auth Keys
+→ Write** (the only scope needed; leave everything under *General* unchecked)
+and tag it `tag:ci`.
+
+**4. GitHub configuration** — under Settings → Environments, create an
+environment named `oci`, then add:
+
+| Kind | Name | Value |
+|------|------|-------|
+| Secret | `TAILSCALE_OAUTH_CLIENT_ID` | OAuth client ID |
+| Secret | `TAILSCALE_OAUTH_CLIENT_SECRET` | OAuth client secret |
+| Variable | `GTD_DEPLOY_HOST` | The VM's MagicDNS name (e.g. `gtd-server`) or Tailscale IP |
+
+Using an `environment` rather than plain repo secrets means you can add
+required reviewers or restrict which branches may deploy.
+
+### What the job does
+
+Installs the exact version from the pushed tag (retrying while PyPI's CDN
+catches up), restarts `gtd-api`, then verifies the unit is active and reports
+the expected version — dumping the last 50 journal lines into the Actions log
+if it isn't. Deploy failures are visible in the Actions UI rather than
+silently leaving a stale app running.
 
 ## Notes
 
