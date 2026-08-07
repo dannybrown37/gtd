@@ -225,6 +225,20 @@ body {
 
 .hidden { display: none !important; }
 
+/* Off-screen rather than display:none — a hidden username field is ignored by
+   password managers, but an off-screen one still counts as part of the login form. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 #capture-form {
   display: flex;
   flex-direction: column;
@@ -319,6 +333,14 @@ button[type=submit], .primary-btn {
   max-height: 85dvh;
   overflow-y: auto;
   overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* A <form> wrapper (needed for password-manager autofill) must not collapse the
+   modal's column spacing into one flex child. */
+.modal form {
   display: flex;
   flex-direction: column;
   gap: 12px;

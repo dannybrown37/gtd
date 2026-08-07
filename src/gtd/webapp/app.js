@@ -138,17 +138,25 @@ function openSettingsModal() {
   const canCancel = !!state.apiKey;
   openModal(`
     <h2>GTD API Key</h2>
-    <label for="api-key-input">Bearer token from your GTD_API_KEY server env var</label>
-    <input id="api-key-input" type="password" autocomplete="off" placeholder="Enter API key" />
-    <div class="modal-actions">
-      ${canCancel ? '<button class="secondary-btn" id="settings-cancel">Cancel</button>' : ''}
-      <button class="primary-btn" id="settings-save">Save</button>
-    </div>
+    <form id="settings-form" action="#" method="post">
+      <label for="api-key-input">Bearer token from your GTD_API_KEY server env var</label>
+      <!-- Password managers only offer to fill/save a credential that has a username
+           field alongside the password one, so give them a fixed identity to key off. -->
+      <input type="text" id="api-key-user" name="username" value="gtd" readonly
+             autocomplete="username" class="visually-hidden" tabindex="-1" aria-hidden="true" />
+      <input id="api-key-input" name="password" type="password"
+             autocomplete="current-password" placeholder="Enter API key" />
+      <div class="modal-actions">
+        ${canCancel ? '<button type="button" class="secondary-btn" id="settings-cancel">Cancel</button>' : ''}
+        <button type="submit" class="primary-btn" id="settings-save">Save</button>
+      </div>
+    </form>
   `);
   const input = $('#api-key-input');
   input.focus();
   if (canCancel) $('#settings-cancel').addEventListener('click', closeModal);
-  $('#settings-save').addEventListener('click', async () => {
+  $('#settings-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
     const value = input.value.trim();
     if (!value) {
       showToast('Enter a key first', true);

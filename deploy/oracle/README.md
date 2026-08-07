@@ -190,6 +190,12 @@ association — that's intended.
 → Write** (the only scope needed; leave everything under *General* unchecked)
 and tag it `tag:ci`.
 
+To rotate it, create a *second* OAuth client with the same scope and tag,
+update `TAILSCALE_OAUTH_CLIENT_ID`/`TAILSCALE_OAUTH_CLIENT_SECRET` in the `oci`
+environment, run a deploy to confirm it works, then revoke the old client in the
+admin console — the secret is only shown once at creation, so it can't be
+recovered, only replaced.
+
 **4. GitHub configuration** — under Settings → Environments, create an
 environment named `oci`, then add:
 
