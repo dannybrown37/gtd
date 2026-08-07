@@ -225,6 +225,20 @@ body {
 
 .hidden { display: none !important; }
 
+/* Off-screen rather than display:none — a hidden username field is ignored by
+   password managers, but an off-screen one still counts as part of the login form. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 #capture-form {
   display: flex;
   flex-direction: column;
@@ -343,9 +357,6 @@ button[type=submit], .primary-btn {
   display: block;
   margin-bottom: 4px;
 }
-
-/* Keeps a label glued to its own input instead of inheriting the form's 12px gap. */
-.modal .field label { margin-bottom: 4px; }
 
 .modal-actions {
   display: flex;

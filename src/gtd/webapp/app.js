@@ -139,20 +139,13 @@ function openSettingsModal() {
   openModal(`
     <h2>GTD API Key</h2>
     <form id="settings-form" action="#" method="post">
-      <!-- This is deliberately a plain, fully visible two-field login form. Password
-           managers other than Chrome's (Bitwarden especially) skip username fields that
-           are readonly, aria-hidden, or clipped to 1px, and a lone password field is not
-           reliably recognised as a credential. Keep both inputs real and visible. -->
-      <div class="field">
-        <label for="api-key-user">Account</label>
-        <input type="text" id="api-key-user" name="username" value="gtd"
-               autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" />
-      </div>
-      <div class="field">
-        <label for="api-key-input">Bearer token from your GTD_API_KEY server env var</label>
-        <input id="api-key-input" name="password" type="password"
-               autocomplete="current-password" placeholder="Enter API key" />
-      </div>
+      <label for="api-key-input">Bearer token from your GTD_API_KEY server env var</label>
+      <!-- Password managers only offer to fill/save a credential that has a username
+           field alongside the password one, so give them a fixed identity to key off. -->
+      <input type="text" id="api-key-user" name="username" value="gtd" readonly
+             autocomplete="username" class="visually-hidden" tabindex="-1" aria-hidden="true" />
+      <input id="api-key-input" name="password" type="password"
+             autocomplete="current-password" placeholder="Enter API key" />
       <div class="modal-actions">
         ${canCancel ? '<button type="button" class="secondary-btn" id="settings-cancel">Cancel</button>' : ''}
         <button type="submit" class="primary-btn" id="settings-save">Save</button>
