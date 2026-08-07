@@ -86,8 +86,24 @@ private key is stored in GitHub, and the only secret is a Tailscale OAuth
 client scoped to minting `tag:ci` auth keys.
 
 Deploys are triggered by the `v*` tag that `commitizen` pushes, **not** by
-every push to `main`. A `chore:`/`docs:`-only push produces no version bump,
-so no tag, so no deploy — that's expected, not a failure.
+every push to `main`. A `chore:`/`docs:`/`ci:`-only push produces no version
+bump, so no tag, so no deploy — that's expected, not a failure. In particular
+a `ci:` commit touching the deploy workflow itself will never deploy itself;
+use the manual run below to test it.
+
+### Testing a deploy without cutting a release
+
+`deploy.yml` also has a `workflow_dispatch` trigger, so the whole path
+(tailnet join → Tailscale SSH → `uv tool install` → `systemctl restart` →
+`GET /`) can be exercised on demand:
+
+- **Actions → Deploy to OCI → Run workflow**, or
+- `gh workflow run deploy.yml` (optionally `-f version=0.7.0`).
+
+Leaving `version` blank installs whatever PyPI currently calls latest, which
+is what you want when you're testing the deploy mechanics rather than a
+specific release. This is the fastest way to check ACL, hostname, or OAuth
+changes — it needs no version bump and no tag.
 
 ### One-time setup
 
@@ -101,6 +117,13 @@ Do this first: `tag:ci` won't be selectable when creating the OAuth client
 until it exists in `tagOwners`, and step 2's `--advertise-tags` will be
 rejected until `tag:gtd-server` does too.
 
+> **Take all four blocks, not just the CI ones.** The moment you write an
+> explicit `grants`/`ssh` section, Tailscale's default-allow-all stops
+> applying — so a policy containing *only* the `tag:ci` rules below locks
+> **you** out of your own tailnet: your phone can no longer reach the VM on
+> `:8000`, and you can no longer SSH to it. The `autogroup:member` rules are
+> what keep your own devices working.
+
 ```jsonc
 {
   // Both tags must be declared before anything can use them.
@@ -109,10 +132,18 @@ rejected until `tag:gtd-server` does too.
     "tag:gtd-server": ["autogroup:admin"],
   },
 
-  // Restrict what CI may reach. Without this, a tagged node can talk to
-  // anything your other ACLs allow — the point is that a compromised
-  // workflow gets one box on one port, not the tailnet.
   "grants": [
+    // Your own devices keep full access to the tailnet, including the VM's
+    // port 8000. Omit this and the webapp becomes unreachable from your
+    // phone the instant the policy is saved.
+    {
+      "src": ["autogroup:member"],
+      "dst": ["*"],
+      "ip":  ["*"],
+    },
+    // Restrict what CI may reach. Without this, a tagged node can talk to
+    // anything your other ACLs allow — the point is that a compromised
+    // workflow gets one box on one port, not the tailnet.
     {
       "src": ["tag:ci"],
       "dst": ["tag:gtd-server"],
@@ -120,11 +151,20 @@ rejected until `tag:gtd-server` does too.
     },
   ],
 
-  // Permit Tailscale SSH from CI to the deploy user. This is what removes
-  // the need for an SSH private key in GitHub — auth is the node's tailnet
-  // identity. `accept` (not `check`) is required: `check` prompts for
-  // browser re-auth, which a CI runner cannot satisfy.
   "ssh": [
+    // Your own SSH access to the VM. A tagged node has **no user owner**, so
+    // it is not covered by `autogroup:self` — the dst must name the tag
+    // explicitly or you can't SSH to your own server anymore.
+    {
+      "action": "check",
+      "src":    ["autogroup:member"],
+      "dst":    ["tag:gtd-server"],
+      "users":  ["autogroup:nonroot", "ubuntu"],
+    },
+    // Permit Tailscale SSH from CI to the deploy user. This is what removes
+    // the need for an SSH private key in GitHub — auth is the node's tailnet
+    // identity. `accept` (not `check`) is required: `check` prompts for
+    // browser re-auth, which a CI runner cannot satisfy.
     {
       "action": "accept",
       "src":    ["tag:ci"],
@@ -157,10 +197,20 @@ environment named `oci`, then add:
 |------|------|-------|
 | Secret | `TAILSCALE_OAUTH_CLIENT_ID` | OAuth client ID |
 | Secret | `TAILSCALE_OAUTH_CLIENT_SECRET` | OAuth client secret |
-| Variable | `GTD_DEPLOY_HOST` | The VM's MagicDNS name (e.g. `gtd-server`) or Tailscale IP |
+| Variable | `GTD_DEPLOY_HOST` | The VM's MagicDNS **hostname** (e.g. `gtd4me`) or Tailscale IP |
 
-Using an `environment` rather than plain repo secrets means you can add
-required reviewers or restrict which branches may deploy.
+> **`GTD_DEPLOY_HOST` is the machine's name, not its ACL tag.** These are two
+> unrelated namespaces and it is easy to conflate them: `tag:gtd-server` is
+> what the ACL rules above match on, while `GTD_DEPLOY_HOST` is what
+> `tailscale ssh ubuntu@<host>` resolves — the hostname shown in the machines
+> list / `tailscale status`, e.g. `gtd4me`. Putting the tag here fails to
+> resolve at the "Check the VM is reachable" step.
+
+Put the two secrets in the **environment**, not at repo level. Repo-level
+secrets do work — the tailnet join will succeed either way — but they're
+readable by every workflow in the repo, which defeats the point of having an
+environment. An `environment` also lets you add required reviewers or
+restrict which branches may deploy.
 
 ### What the job does
 
