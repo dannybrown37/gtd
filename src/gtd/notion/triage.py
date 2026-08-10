@@ -38,7 +38,8 @@ def inbox_filter() -> dict:
 
     List items are reference material, not actions: they legitimately have
     no context, next step, or ISO, so they only count as inbox when they
-    are missing the one field they do need, a List Category.
+    are missing the one field they do need, a List Category. Someday/Maybe
+    items are exempt for the same reason -- they are organised by Area.
 
     Agenda items (`@Person` contexts) are exempt from the next-step/ISO
     clauses too, but Notion's select filters have no `starts_with`, so that
@@ -46,6 +47,13 @@ def inbox_filter() -> dict:
     client-side, and every caller of this filter must apply it as well.
     """
     not_a_list = {'property': 'Status', 'select': {'does_not_equal': 'List'}}
+    # Someday/Maybe is a parked idea: no context, no next step, no ISO -- it
+    # is organised by Area alone, so those clauses would trap it in the inbox
+    # forever.
+    not_someday = {
+        'property': 'Status',
+        'select': {'does_not_equal': 'Someday/Maybe'},
+    }
     incomplete_fields = [
         {'property': 'Context', 'select': {'is_empty': True}},
         {
@@ -59,7 +67,7 @@ def inbox_filter() -> dict:
             {'property': 'Status', 'select': {'equals': 'Triage'}},
             {'property': 'Status', 'select': {'is_empty': True}},
             *(
-                {'and': [not_a_list, condition]}
+                {'and': [not_a_list, not_someday, condition]}
                 for condition in incomplete_fields
             ),
             {
@@ -130,6 +138,24 @@ def _process_single_entry(entry: ProjectEntry) -> bool:  # noqa: C901, PLR0911, 
                 return True
             print('  Cancelled.')
             return False
+
+    # Someday/Maybe is organised by Area, not Context -- a parked idea has
+    # no next action, so nothing else in this flow applies to it either.
+    if status == 'Someday/Maybe':
+        from gtd.notion.client import get_areas
+
+        area = entry.area or None
+        if not area:
+            area = fzf_on_a_list(
+                sorted(get_areas()),
+                prompt=f'"{entry.header}" → Area',
+            )
+        update_page(
+            entry.page_id,
+            build_property_update(status=status, area=area or None),
+        )
+        print(f'  ✓ "{entry.header}" → {status} [{area or "no area"}]')
+        return True
 
     # Context (skip for List items)
     context = None

@@ -88,7 +88,11 @@ A header starting with `@Name` (`@Sam: raise the budget`) declares an *agenda it
 - `_get_today_entries()` (`notion/entries.py`) gates on `context and next_step` → agenda items showed on Projects but not Next Steps. `is_agenda_entry` is now an escape hatch there alongside `Recurring`, which exists for the identical reason.
 - `NextStepListItem._format` printed a dim `(no step)` placeholder above the real content. Agenda rows now render single-line with `→` and the person stripped.
 
-**`_triage_one` is duplicated verbatim in `gtd_tui.py`** (~2394 and ~2836) and mirrored a third time by `_process_single_entry` in `notion/triage.py`. Patch all three or the Inbox tab, the weekly review, and the CLI diverge.
+**Triaging to Someday/Maybe asks for Area, not Context** — and asks for nothing else. A parked idea has no next action, no due date, and no context (Context = "what tool do I need to act on this"); the Someday tab groups by `Area`, so that's the only field triage collects, then it saves and returns. This means `inbox_filter()` must exempt `Someday/Maybe` from its empty-context/next-step/success-condition clauses (it does, server-side via `not_someday`) or every Someday item bounces straight back into the Inbox — the same trap agenda items hit.
+
+**`_triage_one` lives once, on `BaseEntryContent`**, and is mirrored by `_process_single_entry` in `notion/triage.py` (the fzf CLI flow). Patch both or the TUI and the CLI diverge.
+
+It used to be duplicated verbatim on `NextStepsContent` and `InboxContent` — along with `triage_entries`, `action_triage_entry` and `action_triage_all` — and this file instructed you to patch every copy. Only `InboxContent` ever bound `T`/`A`, so the `NextStepsContent` copy (307 lines) was unreachable; the weekly review's triage step reaches the same code by querying `InboxContent` directly (`WeeklyReviewScreen._run_step`). All four are now defined once on the base class. Don't re-inline them into a subclass.
 
 Skipping the Status prompt also removed the inline *Delete* option for agenda items; `D` on the Inbox tab is the remaining exit.
 

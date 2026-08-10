@@ -1381,3 +1381,146 @@ class TestAgendaRowRendering:
             self._entry(header='Vague thing', context='Work')
         )
         assert '(no step)' in out
+
+
+class TestTriageOneIsDefinedOnce:
+    """`_triage_one` and its callers live on the base class, not per-tab.
+
+    They were copy-pasted onto both `NextStepsContent` and `InboxContent`,
+    307 lines each, and only `InboxContent` ever bound `T`/`A` — so one whole
+    copy was unreachable while still needing every fix applied twice.
+    """
+
+    @pytest.mark.parametrize(
+        'name',
+        [
+            '_triage_one',
+            'triage_entries',
+            'action_triage_entry',
+            'action_triage_all',
+        ],
+    )
+    def test_subclasses_do_not_redefine_it(self, name):
+        from gtd.gtd_tui import InboxContent
+
+        assert name in BaseEntryContent.__dict__
+        for cls in (NextStepsContent, InboxContent, SomedayContent):
+            assert name not in cls.__dict__, (
+                f'{cls.__name__} re-inlines {name}'
+            )
+
+
+class TestSomedayTriageAsksForArea:
+    """Someday/Maybe is organised by Area — Context is meaningless for it.
+
+    Triage asked every non-List status for a Context, so parking something in
+    Someday/Maybe demanded "what tool do I need to act on this" for an item
+    explicitly not being acted on.
+    """
+
+    def _triage(
+        self, entry, keys
+    ) -> tuple[list[tuple[str, dict]], bool | None]:
+        from gtd.gtd_tui import InboxContent
+
+        writes: list[tuple[str, dict]] = []
+
+        async def run() -> tuple[list[tuple[str, dict]], bool | None]:
+            content = InboxContent()
+            app = _TabHost(content)
+            with (
+                patch.object(BaseEntryContent, '_load_entries'),
+                patch.object(BaseEntryContent, '_load_notes'),
+                patch('gtd.notion.client.get_areas', return_value=['Health']),
+                patch(
+                    'gtd.notion.client.update_page',
+                    side_effect=lambda pid, props: writes.append((pid, props)),
+                ),
+                patch(
+                    'gtd.notion.client.build_property_update',
+                    side_effect=lambda **kw: kw,
+                ),
+                patch('gtd.notion.client.get_select_options') as contexts,
+            ):
+                async with app.run_test(size=(100, 24)) as pilot:
+                    worker = app.run_worker(content._triage_one(entry))  # noqa: SLF001
+                    for _ in range(6):
+                        await pilot.pause()
+                    for key in keys:
+                        await pilot.press(key)
+                        for _ in range(4):
+                            await pilot.pause()
+                    await worker.wait()
+                    assert not contexts.called  # never asked for a Context
+                    return writes, worker.result
+
+        return asyncio.run(run())
+
+    @staticmethod
+    def _parked(**kw) -> ProjectEntry:
+        return _entry(
+            header='Learn woodworking',
+            status='Triage',
+            context='',
+            next_step='',
+            success_condition='',
+            **kw,
+        )
+
+    # tab into filter mode, narrow to Someday/Maybe, pick it
+    _PICK_SOMEDAY: ClassVar[list[str]] = ['tab', *'someday', 'enter']
+
+    def test_area_is_written_and_nothing_else_is_asked(self):
+        writes, result = self._triage(
+            self._parked(), [*self._PICK_SOMEDAY, 'enter']
+        )
+
+        assert result is True
+        assert writes == [
+            ('abc123', {'status': 'Someday/Maybe', 'area': 'Health'})
+        ]
+
+    def test_existing_area_skips_the_prompt_entirely(self):
+        writes, result = self._triage(
+            self._parked(area='Health'), self._PICK_SOMEDAY
+        )
+
+        assert result is True
+        assert writes == [('abc123', {'status': 'Someday/Maybe'})]
+
+
+class TestSomedayIsNotStuckInTheInbox:
+    """Exempting a status from Context/next-step means exempting the filter.
+
+    `inbox_filter()` counts an empty Context, next step or success condition
+    as "needs triage". Someday items legitimately have none of the three, so
+    without this clause every one of them reappears in the Inbox forever —
+    the same trap `List` and `@Person` items each hit.
+    """
+
+    def test_someday_is_excluded_from_the_incomplete_field_clauses(self):
+        from gtd.notion.triage import inbox_filter
+
+        clauses = [c for c in inbox_filter()['or'] if 'and' in c]
+        field_clauses = [
+            c
+            for c in clauses
+            if any(
+                sub.get('property')
+                in {'Context', 'Next Actionable Step', 'Success Condition'}
+                for sub in c['and']
+            )
+        ]
+        assert field_clauses
+        for clause in field_clauses:
+            assert {
+                'property': 'Status',
+                'select': {'does_not_equal': 'Someday/Maybe'},
+            } in clause['and']
+
+    def test_triage_and_empty_status_still_count_as_inbox(self):
+        from gtd.notion.triage import inbox_filter
+
+        simple = [c for c in inbox_filter()['or'] if 'property' in c]
+        assert {'property': 'Status', 'select': {'equals': 'Triage'}} in simple
+        assert {'property': 'Status', 'select': {'is_empty': True}} in simple

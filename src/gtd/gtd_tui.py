@@ -1206,6 +1206,342 @@ class BaseEntryContent(Vertical):
 
         _create_page(header)
 
+    @work
+    async def action_triage_entry(self) -> None:
+        entry = self._current_entry()
+        if not entry:
+            return
+        triaged = await self._triage_one(entry)
+        if triaged:
+            self._remove_entry(entry.page_id)
+
+    @work
+    async def action_triage_all(self) -> None:
+        await self.triage_entries(self._entries)
+
+    async def triage_entries(self, entries: list[ProjectEntry]) -> bool:
+        """Returns True if completed, False if cancelled."""
+        processed = 0
+        for entry in list(entries):
+            triaged = await self._triage_one(entry)
+            if triaged is None:
+                return False
+            if triaged:
+                processed += 1
+                self._remove_entry(entry.page_id)
+        if processed:
+            s = 's' if processed != 1 else ''
+            self.app.notify(f'✓ Triaged {processed} item{s}')
+        return True
+
+    async def _triage_one(self, entry: ProjectEntry) -> bool | None:  # noqa: PLR0911, PLR0912, C901, PLR0915
+        """Triage a single entry — only prompts for missing fields.
+
+        Returns True if saved, False if skipped/deleted, None if cancelled.
+        """
+        from dateutil import parser as dateparser
+        from gtd.notion.client import (
+            archive_page,
+            build_property_update,
+            get_select_options,
+            update_page,
+        )
+        from gtd.notion.triage import TRIAGE_STATUSES
+
+        title = entry.header.strip()
+        kwargs: dict = {}
+
+        needs_status = not entry.status or entry.status == 'Triage'
+        agenda_person = agenda_person_from_header(entry.header)
+
+        if entry.status == 'List' and entry.context:
+            return True
+        if needs_status and agenda_person:
+            # Agenda items are always Current Project -- don't ask. `D` on the
+            # Inbox tab drops one you don't want.
+            status = AGENDA_STATUS
+            kwargs['status'] = status
+        elif needs_status:
+            status = await self.app.push_screen_wait(
+                SelectModal(f'Triage: {title}', TRIAGE_STATUSES)
+            )
+            if status is None:
+                return None
+            if status == 'Delete':
+                confirmed = await self.app.push_screen_wait(
+                    ConfirmModal(f'Delete "{title}"?')
+                )
+                if confirmed:
+                    try:
+                        await asyncio.get_running_loop().run_in_executor(
+                            None, archive_page, entry.page_id
+                        )
+                    except Exception as e:
+                        self.app.notify(
+                            f'⚠ Delete failed: {e}',
+                            severity='error',
+                        )
+                        return False
+                    self.app.notify(f'✓ Deleted "{title}"')
+                    return True
+                return False
+            kwargs['status'] = status
+        else:
+            status = entry.status
+            action = await self.app.push_screen_wait(
+                SelectModal(
+                    f'{title}',
+                    ['Continue — fill in missing fields', 'Drop this item'],
+                )
+            )
+            if action is None:
+                return None
+            if action and action.startswith('Drop'):
+                confirmed = await self.app.push_screen_wait(
+                    ConfirmModal(f'Delete "{title}"?')
+                )
+                if confirmed:
+                    try:
+                        await asyncio.get_running_loop().run_in_executor(
+                            None, archive_page, entry.page_id
+                        )
+                    except Exception as e:
+                        self.app.notify(
+                            f'⚠ Delete failed: {e}',
+                            severity='error',
+                        )
+                        return False
+                    self.app.notify(f'✓ Deleted "{title}"')
+                    return True
+                return False
+
+        subtitle = title
+
+        if status == 'Someday/Maybe':
+            # Someday items are parked, not actionable. Context answers "what
+            # tool do I need to act on this", which is meaningless here -- the
+            # Someday tab groups by Area, so that's what we ask for, and
+            # nothing else (no next step, no dates) applies to a parked idea.
+            from gtd.notion.client import get_areas
+
+            loop = asyncio.get_running_loop()
+            if not entry.area:
+                areas = await loop.run_in_executor(None, get_areas)
+                area = await self.app.push_screen_wait(
+                    SelectModal(
+                        f'Area: {title}',
+                        sorted(areas),
+                        allow_new=True,
+                    )
+                )
+                if area is None:
+                    return None
+                if area:
+                    kwargs['area'] = area
+            if kwargs:
+                props = build_property_update(**kwargs)
+                try:
+                    await loop.run_in_executor(
+                        None, update_page, entry.page_id, props
+                    )
+                except Exception as e:
+                    self.app.notify(f'⚠ Save failed: {e}', severity='error')
+                    return False
+            area_name = kwargs.get('area', entry.area)
+            suffix = f' [{area_name}]' if area_name else ''
+            self.app.notify(f'✓ "{title}" → Someday/Maybe{suffix}')
+            return True
+
+        if not entry.context and status != 'List' and agenda_person:
+            # "@Sam: raise the budget" already names its context -- don't ask
+            # for one. add_context is idempotent, so a known person is a no-op.
+            from gtd.notion.client import add_context
+
+            await asyncio.get_running_loop().run_in_executor(
+                None, add_context, agenda_person
+            )
+            kwargs['context'] = agenda_person
+        elif not entry.context:
+            if status == 'List':
+                from gtd.notion.client import get_list_categories
+
+                list_categories = (
+                    await asyncio.get_running_loop().run_in_executor(
+                        None, get_list_categories
+                    )
+                )
+                list_category = await self.app.push_screen_wait(
+                    SelectModal(
+                        f'Which list? {title}',
+                        sorted(list_categories),
+                        allow_new=True,
+                    )
+                )
+                if list_category is None:
+                    return None
+                kwargs['list_category'] = list_category
+            else:
+                from gtd.notion.client import (
+                    add_context,
+                    remove_context,
+                )
+
+                loop = asyncio.get_running_loop()
+                context = None
+                while True:
+                    contexts = await loop.run_in_executor(
+                        None, get_select_options, 'Context'
+                    )
+                    context = await self.app.push_screen_wait(
+                        SelectModal(
+                            f'Context: {title}',
+                            [
+                                *sorted(contexts),
+                                '──────────',
+                                '[+ Add new context]',
+                                '[- Remove context]',
+                            ],
+                            allow_new=False,
+                            hidden_prefix=AGENDA_CONTEXT_PREFIX,
+                        )
+                    )
+                    if context is None:
+                        return None
+                    if context == '[+ Add new context]':
+                        new_name = await self.app.push_screen_wait(
+                            InputModal('New context name')
+                        )
+                        if new_name:
+                            await loop.run_in_executor(
+                                None, add_context, new_name
+                            )
+                            self.app.notify(f'✓ Added context: {new_name}')
+                        continue
+                    if context == '[- Remove context]':
+                        contexts_to_remove = await loop.run_in_executor(
+                            None, get_select_options, 'Context'
+                        )
+                        remove_name = await self.app.push_screen_wait(
+                            SelectModal(
+                                'Remove context',
+                                sorted(contexts_to_remove),
+                                allow_new=False,
+                            )
+                        )
+                        if remove_name:
+                            await loop.run_in_executor(
+                                None, remove_context, remove_name
+                            )
+                            msg = f'✓ Removed context: {remove_name}'
+                            self.app.notify(msg)
+                        continue
+                    if context != '──────────':
+                        break
+                kwargs['context'] = context
+
+        if status == 'List':
+            props = build_property_update(**kwargs)
+            await asyncio.get_running_loop().run_in_executor(
+                None, update_page, entry.page_id, props
+            )
+            cat = kwargs.get('list_category', entry.list_category)
+            self.app.notify(f'✓ "{title}" → List [{cat}]')
+            return True
+
+        # Agenda items (@Person) are complete with a context and a date --
+        # the header is the whole action, so skip both prompts.
+        is_agenda = agenda_person is not None or is_agenda_context(
+            kwargs.get('context', entry.context)
+        )
+        if not is_agenda:
+            if not entry.next_step:
+                if status == 'Waiting For':
+                    next_step = await self.app.push_screen_wait(
+                        InputModal(
+                            'Who/what are you waiting on?',
+                            title,
+                            subtitle=subtitle,
+                        )
+                    )
+                    if next_step is None:
+                        return None
+                    if next_step:
+                        kwargs['next_step'] = next_step
+                else:
+                    val = await _open_steps_editor(self.app)
+                    if val:
+                        kwargs['next_step'] = val
+
+            if not entry.success_condition:
+                success_condition = await self.app.push_screen_wait(
+                    InputModal(
+                        'Success condition',
+                        'What does done look like?',
+                        subtitle=subtitle,
+                    )
+                )
+                if success_condition is None:
+                    return None
+                if success_condition:
+                    kwargs['success_condition'] = success_condition
+
+        if not entry.due_date and status != 'Recurring':
+            due_str = await self.app.push_screen_wait(
+                InputModal(
+                    'Due date (blank to skip)',
+                    'e.g. Jul 15, 2026-08-01',
+                    subtitle=subtitle,
+                )
+            )
+            if due_str:
+                try:
+                    parsed = dateparser.parse(due_str, fuzzy=True)
+                    kwargs['due_date'] = parsed.strftime('%Y-%m-%d')
+                except Exception:
+                    self.app.notify(
+                        f'Could not parse "{due_str}", skipping due date.',
+                        severity='warning',
+                    )
+
+        if not entry.follow_up_date:
+            follow_up_prompt = (
+                'Follow-up date (required)'
+                if status == 'Waiting For'
+                else 'Follow-up date (blank to skip)'
+            )
+            follow_str = await self.app.push_screen_wait(
+                InputModal(
+                    follow_up_prompt,
+                    'e.g. Friday, in 3 days',
+                    subtitle=subtitle,
+                )
+            )
+            if follow_str:
+                try:
+                    parsed = dateparser.parse(follow_str, fuzzy=True)
+                    kwargs['follow_up_date'] = parsed.strftime('%Y-%m-%d')
+                except Exception:
+                    self.app.notify(
+                        f'Could not parse "{follow_str}", skipping follow-up.',
+                        severity='warning',
+                    )
+
+        if not kwargs:
+            return True
+
+        props = build_property_update(**kwargs)
+        try:
+            await asyncio.get_running_loop().run_in_executor(
+                None, update_page, entry.page_id, props
+            )
+        except Exception as e:
+            self.app.notify(f'⚠ Save failed: {e}', severity='error')
+            return False
+        final_status = kwargs.get('status', entry.status)
+        final_context = kwargs.get('context', entry.context)
+        self.app.notify(f'✓ "{title}" → {final_status} [{final_context}]')
+        return True
+
 
 # ── Weekly Review Screen ─────────────────────────────────────────────────────
 
@@ -2302,307 +2638,6 @@ class NextStepsContent(BaseEntryContent):
         update_page(page_id, build_property_update(**kwargs))
 
     @work
-    async def action_triage_entry(self) -> None:
-        entry = self._current_entry()
-        if not entry:
-            return
-        triaged = await self._triage_one(entry)
-        if triaged:
-            self._remove_entry(entry.page_id)
-
-    @work
-    async def action_triage_all(self) -> None:
-        await self.triage_entries(self._entries)
-
-    async def triage_entries(self, entries: list[ProjectEntry]) -> bool:
-        """Returns True if completed, False if cancelled."""
-        processed = 0
-        for entry in list(entries):
-            triaged = await self._triage_one(entry)
-            if triaged is None:
-                return False
-            if triaged:
-                processed += 1
-                self._remove_entry(entry.page_id)
-        if processed:
-            s = 's' if processed != 1 else ''
-            self.app.notify(f'✓ Triaged {processed} item{s}')
-        return True
-
-    async def _triage_one(self, entry: ProjectEntry) -> bool | None:  # noqa: PLR0911, PLR0912, C901, PLR0915
-        """Triage a single entry — only prompts for missing fields.
-
-        Returns True if saved, False if skipped/deleted, None if cancelled.
-        """
-        from dateutil import parser as dateparser
-        from gtd.notion.client import (
-            archive_page,
-            build_property_update,
-            get_select_options,
-            update_page,
-        )
-        from gtd.notion.triage import TRIAGE_STATUSES
-
-        title = entry.header.strip()
-        kwargs: dict = {}
-
-        needs_status = not entry.status or entry.status == 'Triage'
-        agenda_person = agenda_person_from_header(entry.header)
-
-        if entry.status == 'List' and entry.context:
-            return True
-        if needs_status and agenda_person:
-            # Agenda items are always Current Project -- don't ask. `D` on the
-            # Inbox tab drops one you don't want.
-            status = AGENDA_STATUS
-            kwargs['status'] = status
-        elif needs_status:
-            status = await self.app.push_screen_wait(
-                SelectModal(f'Triage: {title}', TRIAGE_STATUSES)
-            )
-            if status is None:
-                return None
-            if status == 'Delete':
-                confirmed = await self.app.push_screen_wait(
-                    ConfirmModal(f'Delete "{title}"?')
-                )
-                if confirmed:
-                    try:
-                        await asyncio.get_running_loop().run_in_executor(
-                            None, archive_page, entry.page_id
-                        )
-                    except Exception as e:
-                        self.app.notify(
-                            f'⚠ Delete failed: {e}',
-                            severity='error',
-                        )
-                        return False
-                    self.app.notify(f'✓ Deleted "{title}"')
-                    return True
-                return False
-            kwargs['status'] = status
-        else:
-            status = entry.status
-            action = await self.app.push_screen_wait(
-                SelectModal(
-                    f'{title}',
-                    ['Continue — fill in missing fields', 'Drop this item'],
-                )
-            )
-            if action is None:
-                return None
-            if action and action.startswith('Drop'):
-                confirmed = await self.app.push_screen_wait(
-                    ConfirmModal(f'Delete "{title}"?')
-                )
-                if confirmed:
-                    try:
-                        await asyncio.get_running_loop().run_in_executor(
-                            None, archive_page, entry.page_id
-                        )
-                    except Exception as e:
-                        self.app.notify(
-                            f'⚠ Delete failed: {e}',
-                            severity='error',
-                        )
-                        return False
-                    self.app.notify(f'✓ Deleted "{title}"')
-                    return True
-                return False
-
-        subtitle = title
-
-        if not entry.context and status != 'List' and agenda_person:
-            # "@Sam: raise the budget" already names its context -- don't ask
-            # for one. add_context is idempotent, so a known person is a no-op.
-            from gtd.notion.client import add_context
-
-            await asyncio.get_running_loop().run_in_executor(
-                None, add_context, agenda_person
-            )
-            kwargs['context'] = agenda_person
-        elif not entry.context:
-            if status == 'List':
-                from gtd.notion.client import get_list_categories
-
-                list_categories = (
-                    await asyncio.get_running_loop().run_in_executor(
-                        None, get_list_categories
-                    )
-                )
-                list_category = await self.app.push_screen_wait(
-                    SelectModal(
-                        f'Which list? {title}',
-                        sorted(list_categories),
-                        allow_new=True,
-                    )
-                )
-                if list_category is None:
-                    return None
-                kwargs['list_category'] = list_category
-            else:
-                from gtd.notion.client import (
-                    add_context,
-                    remove_context,
-                )
-
-                loop = asyncio.get_running_loop()
-                context = None
-                while True:
-                    contexts = await loop.run_in_executor(
-                        None, get_select_options, 'Context'
-                    )
-                    context = await self.app.push_screen_wait(
-                        SelectModal(
-                            f'Context: {title}',
-                            [
-                                *sorted(contexts),
-                                '──────────',
-                                '[+ Add new context]',
-                                '[- Remove context]',
-                            ],
-                            allow_new=False,
-                            hidden_prefix=AGENDA_CONTEXT_PREFIX,
-                        )
-                    )
-                    if context is None:
-                        return None
-                    if context == '[+ Add new context]':
-                        new_name = await self.app.push_screen_wait(
-                            InputModal('New context name')
-                        )
-                        if new_name:
-                            await loop.run_in_executor(
-                                None, add_context, new_name
-                            )
-                            self.app.notify(f'✓ Added context: {new_name}')
-                        continue
-                    if context == '[- Remove context]':
-                        contexts_to_remove = await loop.run_in_executor(
-                            None, get_select_options, 'Context'
-                        )
-                        remove_name = await self.app.push_screen_wait(
-                            SelectModal(
-                                'Remove context',
-                                sorted(contexts_to_remove),
-                                allow_new=False,
-                            )
-                        )
-                        if remove_name:
-                            await loop.run_in_executor(
-                                None, remove_context, remove_name
-                            )
-                            msg = f'✓ Removed context: {remove_name}'
-                            self.app.notify(msg)
-                        continue
-                    if context != '──────────':
-                        break
-                kwargs['context'] = context
-
-        if status == 'List':
-            props = build_property_update(**kwargs)
-            await asyncio.get_running_loop().run_in_executor(
-                None, update_page, entry.page_id, props
-            )
-            cat = kwargs.get('list_category', entry.list_category)
-            self.app.notify(f'✓ "{title}" → List [{cat}]')
-            return True
-
-        # Agenda items (@Person) are complete with a context and a date --
-        # the header is the whole action, so skip both prompts.
-        is_agenda = agenda_person is not None or is_agenda_context(
-            kwargs.get('context', entry.context)
-        )
-        if not is_agenda:
-            if not entry.next_step:
-                if status == 'Waiting For':
-                    next_step = await self.app.push_screen_wait(
-                        InputModal(
-                            'Who/what are you waiting on?',
-                            title,
-                            subtitle=subtitle,
-                        )
-                    )
-                    if next_step is None:
-                        return None
-                    if next_step:
-                        kwargs['next_step'] = next_step
-                else:
-                    val = await _open_steps_editor(self.app)
-                    if val:
-                        kwargs['next_step'] = val
-
-            if not entry.success_condition:
-                success_condition = await self.app.push_screen_wait(
-                    InputModal(
-                        'Success condition',
-                        'What does done look like?',
-                        subtitle=subtitle,
-                    )
-                )
-                if success_condition is None:
-                    return None
-                if success_condition:
-                    kwargs['success_condition'] = success_condition
-
-        if not entry.due_date and status != 'Recurring':
-            due_str = await self.app.push_screen_wait(
-                InputModal(
-                    'Due date (blank to skip)',
-                    'e.g. Jul 15, 2026-08-01',
-                    subtitle=subtitle,
-                )
-            )
-            if due_str:
-                try:
-                    parsed = dateparser.parse(due_str, fuzzy=True)
-                    kwargs['due_date'] = parsed.strftime('%Y-%m-%d')
-                except Exception:
-                    self.app.notify(
-                        f'Could not parse "{due_str}", skipping due date.',
-                        severity='warning',
-                    )
-
-        if not entry.follow_up_date:
-            follow_up_prompt = (
-                'Follow-up date (required)'
-                if status == 'Waiting For'
-                else 'Follow-up date (blank to skip)'
-            )
-            follow_str = await self.app.push_screen_wait(
-                InputModal(
-                    follow_up_prompt,
-                    'e.g. Friday, in 3 days',
-                    subtitle=subtitle,
-                )
-            )
-            if follow_str:
-                try:
-                    parsed = dateparser.parse(follow_str, fuzzy=True)
-                    kwargs['follow_up_date'] = parsed.strftime('%Y-%m-%d')
-                except Exception:
-                    self.app.notify(
-                        f'Could not parse "{follow_str}", skipping follow-up.',
-                        severity='warning',
-                    )
-
-        if not kwargs:
-            return True
-
-        props = build_property_update(**kwargs)
-        try:
-            await asyncio.get_running_loop().run_in_executor(
-                None, update_page, entry.page_id, props
-            )
-        except Exception as e:
-            self.app.notify(f'⚠ Save failed: {e}', severity='error')
-            return False
-        final_status = kwargs.get('status', entry.status)
-        final_context = kwargs.get('context', entry.context)
-        self.app.notify(f'✓ "{title}" → {final_status} [{final_context}]')
-        return True
-
-    @work
     async def action_update_entry(self) -> None:  # noqa: PLR0911
         from gtd.notion.client import (
             build_property_update,
@@ -2740,307 +2775,6 @@ class InboxContent(BaseEntryContent):
     def seed_entries(self, entries: list[ProjectEntry]) -> None:
         """Pre-populate entries (e.g. from weekly review flow)."""
         self._entries = entries
-
-    @work
-    async def action_triage_entry(self) -> None:
-        entry = self._current_entry()
-        if not entry:
-            return
-        triaged = await self._triage_one(entry)
-        if triaged:
-            self._remove_entry(entry.page_id)
-
-    @work
-    async def action_triage_all(self) -> None:
-        await self.triage_entries(self._entries)
-
-    async def triage_entries(self, entries: list[ProjectEntry]) -> bool:
-        """Returns True if completed, False if cancelled."""
-        processed = 0
-        for entry in list(entries):
-            triaged = await self._triage_one(entry)
-            if triaged is None:
-                return False
-            if triaged:
-                processed += 1
-                self._remove_entry(entry.page_id)
-        if processed:
-            s = 's' if processed != 1 else ''
-            self.app.notify(f'✓ Triaged {processed} item{s}')
-        return True
-
-    async def _triage_one(self, entry: ProjectEntry) -> bool | None:  # noqa: PLR0911, PLR0912, C901, PLR0915
-        """Triage a single entry — only prompts for missing fields.
-
-        Returns True if saved, False if skipped/deleted, None if cancelled.
-        """
-        from dateutil import parser as dateparser
-        from gtd.notion.client import (
-            archive_page,
-            build_property_update,
-            get_select_options,
-            update_page,
-        )
-        from gtd.notion.triage import TRIAGE_STATUSES
-
-        title = entry.header.strip()
-        kwargs: dict = {}
-
-        needs_status = not entry.status or entry.status == 'Triage'
-        agenda_person = agenda_person_from_header(entry.header)
-
-        if entry.status == 'List' and entry.context:
-            return True
-        if needs_status and agenda_person:
-            # Agenda items are always Current Project -- don't ask. `D` on the
-            # Inbox tab drops one you don't want.
-            status = AGENDA_STATUS
-            kwargs['status'] = status
-        elif needs_status:
-            status = await self.app.push_screen_wait(
-                SelectModal(f'Triage: {title}', TRIAGE_STATUSES)
-            )
-            if status is None:
-                return None
-            if status == 'Delete':
-                confirmed = await self.app.push_screen_wait(
-                    ConfirmModal(f'Delete "{title}"?')
-                )
-                if confirmed:
-                    try:
-                        await asyncio.get_running_loop().run_in_executor(
-                            None, archive_page, entry.page_id
-                        )
-                    except Exception as e:
-                        self.app.notify(
-                            f'⚠ Delete failed: {e}',
-                            severity='error',
-                        )
-                        return False
-                    self.app.notify(f'✓ Deleted "{title}"')
-                    return True
-                return False
-            kwargs['status'] = status
-        else:
-            status = entry.status
-            action = await self.app.push_screen_wait(
-                SelectModal(
-                    f'{title}',
-                    ['Continue — fill in missing fields', 'Drop this item'],
-                )
-            )
-            if action is None:
-                return None
-            if action and action.startswith('Drop'):
-                confirmed = await self.app.push_screen_wait(
-                    ConfirmModal(f'Delete "{title}"?')
-                )
-                if confirmed:
-                    try:
-                        await asyncio.get_running_loop().run_in_executor(
-                            None, archive_page, entry.page_id
-                        )
-                    except Exception as e:
-                        self.app.notify(
-                            f'⚠ Delete failed: {e}',
-                            severity='error',
-                        )
-                        return False
-                    self.app.notify(f'✓ Deleted "{title}"')
-                    return True
-                return False
-
-        subtitle = title
-
-        if not entry.context and status != 'List' and agenda_person:
-            # "@Sam: raise the budget" already names its context -- don't ask
-            # for one. add_context is idempotent, so a known person is a no-op.
-            from gtd.notion.client import add_context
-
-            await asyncio.get_running_loop().run_in_executor(
-                None, add_context, agenda_person
-            )
-            kwargs['context'] = agenda_person
-        elif not entry.context:
-            if status == 'List':
-                from gtd.notion.client import get_list_categories
-
-                list_categories = (
-                    await asyncio.get_running_loop().run_in_executor(
-                        None, get_list_categories
-                    )
-                )
-                list_category = await self.app.push_screen_wait(
-                    SelectModal(
-                        f'Which list? {title}',
-                        sorted(list_categories),
-                        allow_new=True,
-                    )
-                )
-                if list_category is None:
-                    return None
-                kwargs['list_category'] = list_category
-            else:
-                from gtd.notion.client import (
-                    add_context,
-                    remove_context,
-                )
-
-                loop = asyncio.get_running_loop()
-                context = None
-                while True:
-                    contexts = await loop.run_in_executor(
-                        None, get_select_options, 'Context'
-                    )
-                    context = await self.app.push_screen_wait(
-                        SelectModal(
-                            f'Context: {title}',
-                            [
-                                *sorted(contexts),
-                                '──────────',
-                                '[+ Add new context]',
-                                '[- Remove context]',
-                            ],
-                            allow_new=False,
-                            hidden_prefix=AGENDA_CONTEXT_PREFIX,
-                        )
-                    )
-                    if context is None:
-                        return None
-                    if context == '[+ Add new context]':
-                        new_name = await self.app.push_screen_wait(
-                            InputModal('New context name')
-                        )
-                        if new_name:
-                            await loop.run_in_executor(
-                                None, add_context, new_name
-                            )
-                            self.app.notify(f'✓ Added context: {new_name}')
-                        continue
-                    if context == '[- Remove context]':
-                        contexts_to_remove = await loop.run_in_executor(
-                            None, get_select_options, 'Context'
-                        )
-                        remove_name = await self.app.push_screen_wait(
-                            SelectModal(
-                                'Remove context',
-                                sorted(contexts_to_remove),
-                                allow_new=False,
-                            )
-                        )
-                        if remove_name:
-                            await loop.run_in_executor(
-                                None, remove_context, remove_name
-                            )
-                            msg = f'✓ Removed context: {remove_name}'
-                            self.app.notify(msg)
-                        continue
-                    if context != '──────────':
-                        break
-                kwargs['context'] = context
-
-        if status == 'List':
-            props = build_property_update(**kwargs)
-            await asyncio.get_running_loop().run_in_executor(
-                None, update_page, entry.page_id, props
-            )
-            cat = kwargs.get('list_category', entry.list_category)
-            self.app.notify(f'✓ "{title}" → List [{cat}]')
-            return True
-
-        # Agenda items (@Person) are complete with a context and a date --
-        # the header is the whole action, so skip both prompts.
-        is_agenda = agenda_person is not None or is_agenda_context(
-            kwargs.get('context', entry.context)
-        )
-        if not is_agenda:
-            if not entry.next_step:
-                if status == 'Waiting For':
-                    next_step = await self.app.push_screen_wait(
-                        InputModal(
-                            'Who/what are you waiting on?',
-                            title,
-                            subtitle=subtitle,
-                        )
-                    )
-                    if next_step is None:
-                        return None
-                    if next_step:
-                        kwargs['next_step'] = next_step
-                else:
-                    val = await _open_steps_editor(self.app)
-                    if val:
-                        kwargs['next_step'] = val
-
-            if not entry.success_condition:
-                success_condition = await self.app.push_screen_wait(
-                    InputModal(
-                        'Success condition',
-                        'What does done look like?',
-                        subtitle=subtitle,
-                    )
-                )
-                if success_condition is None:
-                    return None
-                if success_condition:
-                    kwargs['success_condition'] = success_condition
-
-        if not entry.due_date and status != 'Recurring':
-            due_str = await self.app.push_screen_wait(
-                InputModal(
-                    'Due date (blank to skip)',
-                    'e.g. Jul 15, 2026-08-01',
-                    subtitle=subtitle,
-                )
-            )
-            if due_str:
-                try:
-                    parsed = dateparser.parse(due_str, fuzzy=True)
-                    kwargs['due_date'] = parsed.strftime('%Y-%m-%d')
-                except Exception:
-                    self.app.notify(
-                        f'Could not parse "{due_str}", skipping due date.',
-                        severity='warning',
-                    )
-
-        if not entry.follow_up_date:
-            follow_up_prompt = (
-                'Follow-up date (required)'
-                if status == 'Waiting For'
-                else 'Follow-up date (blank to skip)'
-            )
-            follow_str = await self.app.push_screen_wait(
-                InputModal(
-                    follow_up_prompt,
-                    'e.g. Friday, in 3 days',
-                    subtitle=subtitle,
-                )
-            )
-            if follow_str:
-                try:
-                    parsed = dateparser.parse(follow_str, fuzzy=True)
-                    kwargs['follow_up_date'] = parsed.strftime('%Y-%m-%d')
-                except Exception:
-                    self.app.notify(
-                        f'Could not parse "{follow_str}", skipping follow-up.',
-                        severity='warning',
-                    )
-
-        if not kwargs:
-            return True
-
-        props = build_property_update(**kwargs)
-        try:
-            await asyncio.get_running_loop().run_in_executor(
-                None, update_page, entry.page_id, props
-            )
-        except Exception as e:
-            self.app.notify(f'⚠ Save failed: {e}', severity='error')
-            return False
-        final_status = kwargs.get('status', entry.status)
-        final_context = kwargs.get('context', entry.context)
-        self.app.notify(f'✓ "{title}" → {final_status} [{final_context}]')
-        return True
 
     @work
     async def action_update_entry(self) -> None:  # noqa: PLR0911
