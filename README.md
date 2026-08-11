@@ -252,6 +252,7 @@ your own token.
 | `GET` | `/styles.css` | Serve the web app's stylesheet. |
 | `GET` | `/triage-schema` | Get schema for triage workflow: statuses and contexts per status. |
 | `POST` | `/triage/<page_id>` | Atomically triage an entry with full data. |
+| `GET` | `/version` | Return the running gtd-tui version. |
 <!-- END API MENU -->
 
 ## Updating this README
@@ -286,6 +287,7 @@ src/gtd/
 ├── storage.py      # Local JSON I/O for weekly review state and habit dates.
 ├── tui.py          # Shared Textual widgets and modals for the GTD TUI.
 ├── ui.py           # fzf helpers, prompts, and formatting shared across CLI commands.
+├── version.py      # Single source of the running version, read from installed package metadata.
 ├── notion/
 │   ├── capture.py  # Quick-capture items to the GTD inbox (Notion Projects table).
 │   ├── client.py   # Notion REST API client (httpx).

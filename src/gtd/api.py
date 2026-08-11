@@ -45,6 +45,7 @@ from gtd.notion.views import (
     inbox_entries,
     next_steps_entries,
 )
+from gtd.version import get_version
 
 import logging
 
@@ -413,6 +414,13 @@ def patch_area(name: str) -> Any:
     except Exception:
         logger.exception('Failed to rename area %s', name)
         return jsonify(error='Could not rename area'), 500
+
+
+@app.get('/version')
+@require_auth
+def version() -> Any:
+    """Return the running gtd-tui version."""
+    return jsonify(version=get_version())
 
 
 @app.get('/inbox')

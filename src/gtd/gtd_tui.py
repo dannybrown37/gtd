@@ -60,6 +60,7 @@ from gtd.tui import (
     remove_list_item,
     repopulate,
 )
+from gtd.version import get_version
 
 
 class SplitFooter(Footer):
@@ -3730,6 +3731,7 @@ class GTDSearchProvider(Provider):
 
 class GTDApp(App[None]):
     TITLE = 'GTD'
+    SUB_TITLE = f'v{get_version()}'
     COMMANDS: ClassVar[set] = {GTDSearchProvider}
     ENABLE_COMMAND_PALETTE = True
 

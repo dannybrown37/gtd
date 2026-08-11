@@ -201,8 +201,23 @@ $('#settings-btn').addEventListener('click', openSettingsModal);
 
 // region Navigation
 
+// Fetched once and cached; the version only changes when the server restarts.
+let cachedVersion = '';
+
+async function showNavVersion() {
+  const slot = $('#nav-version');
+  if (!cachedVersion) {
+    try {
+      cachedVersion = (await apiFetch('/version')).version || '';
+    } catch {
+      return;
+    }
+  }
+  slot.textContent = cachedVersion ? `v${cachedVersion}` : '';
+}
+
 function buildNavMenu() {
-  navMenu.innerHTML = Object.entries(VIEWS)
+  $('#nav-items').innerHTML = Object.entries(VIEWS)
     .map(([id, v]) => {
       const active = id === state.activeView ? ' active' : '';
       return `<button class="nav-item${active}" data-view="${id}">${escapeHtml(v.label)}</button>`;
@@ -219,6 +234,7 @@ function buildNavMenu() {
 function openNav() {
   buildNavMenu();
   navMenu.classList.remove('hidden');
+  showNavVersion();
 }
 
 function closeNav() {
