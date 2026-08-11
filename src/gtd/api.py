@@ -37,10 +37,14 @@ from gtd.notion.client import (
     update_page,
     archive_page,
 )
-from gtd.notion.entries import is_due_today
 from gtd.notion.models import ProjectEntry
 from gtd.notion.schema import STATUSES
 from gtd.notion.triage import TRIAGE_STATUSES
+from gtd.notion.views import (
+    entries_for_status,
+    inbox_entries,
+    next_steps_entries,
+)
 
 import logging
 
@@ -166,20 +170,6 @@ def _parse_iso_date(value: str) -> str | None:
 # endregion Utils
 
 # region Triage Helpers
-
-
-def _current_project_or_recurring_query() -> dict:
-    """Return query for Current Project or Recurring entries."""
-    return {
-        'property': 'Status',
-        'or': [
-            {
-                'property': 'Status',
-                'select': {'equals': 'Current Project'},
-            },
-            {'property': 'Status', 'select': {'equals': 'Recurring'}},
-        ],
-    }
 
 
 def _validate_triage_status(status: str) -> tuple[dict, int] | None:
@@ -428,14 +418,8 @@ def patch_area(name: str) -> Any:
 @app.get('/inbox')
 @require_auth
 def inbox() -> Any:
-    """Get all Triage entries (inbox)."""
-    pages = query_database(
-        filter_obj={
-            'property': 'Status',
-            'select': {'equals': 'Triage'},
-        },
-    )
-    entries = [ProjectEntry.from_page(p) for p in pages]
+    """Get everything needing triage (inbox)."""
+    entries = inbox_entries()
     entries.sort(key=lambda e: (e.due_date or '9999-99-99', e.header))
     return jsonify([_entry_dict(e) for e in entries])
 
@@ -458,31 +442,13 @@ def entries() -> Any:
             error=f'Invalid status "{status}". Valid: {", ".join(STATUSES)}',
         ), 400
 
-    pages = query_database(
-        filter_obj={'property': 'Status', 'select': {'equals': status}},
-    )
-    found = [ProjectEntry.from_page(p) for p in pages]
-
-    follow_up = request.args.get('follow_up')
-    if follow_up in {'future', 'due'}:
-        today_str = _get_timezone_iso_date()
-        if follow_up == 'future':
-            found = [
-                e
-                for e in found
-                if e.follow_up_date and e.follow_up_date > today_str
-            ]
-        else:
-            found = [
-                e
-                for e in found
-                if not e.follow_up_date or e.follow_up_date <= today_str
-            ]
-
     context = request.args.get('context')
-    if context:
-        context = unquote_plus(context)
-        found = [e for e in found if e.context == context]
+    found = entries_for_status(
+        status,
+        context=unquote_plus(context) if context else None,
+        follow_up=request.args.get('follow_up'),
+        today=_get_timezone_iso_date(),
+    )
 
     found.sort(key=lambda e: (e.due_date or '9999-99-99', e.header.lower()))
     return jsonify([_entry_dict(e) for e in found])
@@ -587,15 +553,12 @@ def contexts() -> Any:
     work_end_minute = 30
     friday = 4
 
-    today_str = _get_timezone_iso_date()
-    pages = query_database(filter_obj=_current_project_or_recurring_query())
-    entries = [ProjectEntry.from_page(p) for p in pages]
-    active_contexts = {
-        e.context
-        for e in entries
-        if e.context
-        and (not e.follow_up_date or e.follow_up_date <= today_str)
-    }
+    # The contexts you can actually act in *now*, so this has to be the
+    # Next Steps view exactly. Deriving it separately meant `/next-steps`
+    # could return an item under a context `/contexts` never offered --
+    # unreachable through the picker.
+    entries = next_steps_entries(_get_timezone_iso_date())
+    active_contexts = {e.context for e in entries if e.context}
 
     # Filter out 'Work' if not during work hours
     now = datetime.now(ZoneInfo('America/New_York'))
@@ -622,10 +585,7 @@ def contexts() -> Any:
 @require_auth
 def next_steps() -> Any:
     """Get actionable next steps, optionally filtered by context."""
-    today_str = _get_timezone_iso_date()
-    pages = query_database(filter_obj=_current_project_or_recurring_query())
-    entries = [ProjectEntry.from_page(p) for p in pages]
-    entries = [e for e in entries if is_due_today(e, today_str)]
+    entries = next_steps_entries(_get_timezone_iso_date())
     context = request.args.get('context')
     if context:
         context = unquote_plus(context)
@@ -825,12 +785,10 @@ def get_list(category: str) -> Any:
         return jsonify(error=msg), 404
 
     canonical_category = normalized[key]
-    pages = query_database(
-        filter_obj={
-            'property': 'List Category',
-            'select': {'equals': canonical_category},
-        },
-    )
+    # Status too, not just the category: the Lists tab is `Status == 'List'`,
+    # so filtering on the category alone showed the phone entries the TUI
+    # never listed.
+    entries = entries_for_status('List', list_category=canonical_category)
     extra_excludes = [
         *EXCLUDE_THESE,
         'follow_up_date',
@@ -838,7 +796,6 @@ def get_list(category: str) -> Any:
         'context',
     ]
 
-    entries = [ProjectEntry.from_page(p) for p in pages]
     entries.sort(key=lambda e: (e.due_date or '9999-99-99', e.header))
     return jsonify([_entry_dict(e, extra_excludes) for e in entries])
 

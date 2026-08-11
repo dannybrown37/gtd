@@ -16,11 +16,11 @@ from gtd.notion.client import (
     update_page,
 )
 from gtd.notion.entries import (
-    _get_today_entries,
     _parse_date_input,
     select_entry,
 )
 from gtd.notion.models import ProjectEntry
+from gtd.notion.views import next_steps_entries
 from gtd.ui import prompt_input
 
 
@@ -114,7 +114,7 @@ def _log_and_reschedule_entry(entry: ProjectEntry) -> None:
 
 def log_and_reschedule() -> None:
     """Log a note and reschedule recurring items."""
-    actionable = _get_today_entries()
+    actionable = next_steps_entries()
 
     if not actionable:
         print('Nothing actionable today.')

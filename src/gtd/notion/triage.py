@@ -8,7 +8,6 @@ from gtd.notion.client import (
     get_list_categories,
     get_page_body,
     get_select_options,
-    query_database,
     update_page,
 )
 from gtd.notion.entries import (
@@ -22,91 +21,12 @@ from gtd.notion.schema import (
     AGENDA_STATUS,
     agenda_person_from_header,
     is_agenda_context,
-    is_agenda_entry,
 )
+from gtd.notion.views import inbox_entries
 from gtd.ui import CancelAction, fzf_on_a_list, prompt_input
 
 
 TRIAGE_STATUSES = [s for s in ALL_STATUSES if s != 'Triage'] + ['Delete']
-
-
-def inbox_filter() -> dict:
-    """The one definition of "inbox": items needing triage.
-
-    Every surface that shows an inbox — the TUI Inbox tab, the Weekly
-    Review, the CLI triage flow — must use this, or the counts disagree.
-
-    List items are reference material, not actions: they legitimately have
-    no context, next step, or ISO, so they only count as inbox when they
-    are missing the one field they do need, a List Category. Someday/Maybe
-    items are exempt for the same reason -- they are organised by Area.
-
-    Agenda items (`@Person` contexts) are exempt from the next-step/ISO
-    clauses too, but Notion's select filters have no `starts_with`, so that
-    part can't be expressed here -- `drop_triaged_agenda_items` applies it
-    client-side, and every caller of this filter must apply it as well.
-    """
-    not_a_list = {'property': 'Status', 'select': {'does_not_equal': 'List'}}
-    # Someday/Maybe is a parked idea: no context, no next step, no ISO -- it
-    # is organised by Area alone, so those clauses would trap it in the inbox
-    # forever.
-    not_someday = {
-        'property': 'Status',
-        'select': {'does_not_equal': 'Someday/Maybe'},
-    }
-    incomplete_fields = [
-        {'property': 'Context', 'select': {'is_empty': True}},
-        {
-            'property': 'Next Actionable Step',
-            'rich_text': {'is_empty': True},
-        },
-        {'property': 'Success Condition', 'rich_text': {'is_empty': True}},
-    ]
-    return {
-        'or': [
-            {'property': 'Status', 'select': {'equals': 'Triage'}},
-            {'property': 'Status', 'select': {'is_empty': True}},
-            *(
-                {'and': [not_a_list, not_someday, condition]}
-                for condition in incomplete_fields
-            ),
-            {
-                'and': [
-                    {'property': 'Status', 'select': {'equals': 'List'}},
-                    {
-                        'property': 'List Category',
-                        'select': {'is_empty': True},
-                    },
-                ],
-            },
-        ],
-    }
-
-
-def drop_triaged_agenda_items(
-    entries: list[ProjectEntry],
-) -> list[ProjectEntry]:
-    """Remove already-triaged agenda items from an inbox result set.
-
-    "Mention the budget to Sam" needs no Next Actionable Step and no Success
-    Condition -- the header is the whole action. Without this they match
-    `inbox_filter`'s missing-field clauses forever and never leave the inbox.
-    An agenda item still sitting in Triage (or with no status at all) hasn't
-    been processed yet, so it stays.
-    """
-    return [
-        e
-        for e in entries
-        if not (is_agenda_entry(e) and e.status and e.status != 'Triage')
-    ]
-
-
-def get_inbox_entries() -> list[ProjectEntry]:
-    """Fetch items needing triage: no/Triage status, or missing fields."""
-    pages = query_database(filter_obj=inbox_filter())
-    return drop_triaged_agenda_items(
-        [ProjectEntry.from_page(p) for p in pages]
-    )
 
 
 def _process_single_entry(entry: ProjectEntry) -> bool:  # noqa: C901, PLR0911, PLR0912, PLR0915
@@ -285,7 +205,7 @@ def _process_single_entry(entry: ProjectEntry) -> bool:  # noqa: C901, PLR0911, 
 
 def process_triage() -> None:
     """Interactive triage processing flow."""
-    entries = get_inbox_entries()
+    entries = inbox_entries()
     if not entries:
         print('No items in Triage. Inbox zero! 🎉')
         return

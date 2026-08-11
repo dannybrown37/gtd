@@ -926,12 +926,8 @@ class TestProjectsDrop:
             app = _BrowseHost()
             with (
                 patch(
-                    'gtd.notion.client.query_database',
-                    return_value=[MagicMock()],
-                ),
-                patch(
-                    'gtd.gtd_tui.ProjectEntry.from_page',
-                    side_effect=lambda _p: entries[0],
+                    'gtd.notion.views.entries_for_status',
+                    return_value=list(entries),
                 ),
                 patch(
                     'gtd.notion.client.archive_page',
@@ -1499,7 +1495,7 @@ class TestSomedayIsNotStuckInTheInbox:
     """
 
     def test_someday_is_excluded_from_the_incomplete_field_clauses(self):
-        from gtd.notion.triage import inbox_filter
+        from gtd.notion.views import inbox_filter
 
         clauses = [c for c in inbox_filter()['or'] if 'and' in c]
         field_clauses = [
@@ -1519,7 +1515,7 @@ class TestSomedayIsNotStuckInTheInbox:
             } in clause['and']
 
     def test_triage_and_empty_status_still_count_as_inbox(self):
-        from gtd.notion.triage import inbox_filter
+        from gtd.notion.views import inbox_filter
 
         simple = [c for c in inbox_filter()['or'] if 'property' in c]
         assert {'property': 'Status', 'select': {'equals': 'Triage'}} in simple

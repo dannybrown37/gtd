@@ -3,7 +3,6 @@
 from gtd.notion.client import (
     archive_page,
     build_property_update,
-    query_database,
     update_page,
 )
 from gtd.notion.entries import (
@@ -14,20 +13,14 @@ from gtd.notion.entries import (
     show_triage,
 )
 from gtd.notion.log import _confirm_delete
-from gtd.notion.models import ProjectEntry
 from gtd.notion.triage import process_triage
+from gtd.notion.views import entries_for_status
 from gtd.ui import CancelAction, prompt_input
 
 
 def mark_done() -> None:
     """Interactively select a Current Project to mark as done."""
-    pages = query_database(
-        filter_obj={
-            'property': 'Status',
-            'select': {'equals': 'Current Project'},
-        },
-    )
-    entries = [ProjectEntry.from_page(p) for p in pages]
+    entries = entries_for_status('Current Project')
 
     if not entries:
         print('No current projects.')
@@ -47,13 +40,7 @@ def mark_done() -> None:
 
 def defer_entry() -> None:
     """Set a follow-up date on a current project."""
-    pages = query_database(
-        filter_obj={
-            'property': 'Status',
-            'select': {'equals': 'Current Project'},
-        },
-    )
-    entries = [ProjectEntry.from_page(p) for p in pages]
+    entries = entries_for_status('Current Project')
 
     if not entries:
         print('No current projects.')
@@ -80,13 +67,7 @@ def defer_entry() -> None:
 
 def set_waiting_for() -> None:
     """Move a current project to Waiting For status."""
-    pages = query_database(
-        filter_obj={
-            'property': 'Status',
-            'select': {'equals': 'Current Project'},
-        },
-    )
-    entries = [ProjectEntry.from_page(p) for p in pages]
+    entries = entries_for_status('Current Project')
 
     if not entries:
         print('No current projects.')

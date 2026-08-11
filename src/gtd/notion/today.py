@@ -15,17 +15,17 @@ from gtd.notion.entries import (
     _edit_entry_fields,
     _entry_preview_text,
     _escape_for_shell,
-    _get_today_entries,
     _parse_date_input,
     select_entry,
 )
 from gtd.notion.log import _confirm_delete, _log_and_reschedule_entry
+from gtd.notion.views import next_steps_entries
 from gtd.ui import fzf_on_a_list, prompt_input
 
 
 def list_today() -> None:  # noqa: C901, PLR0912
     """Interactive today view — pick items and take action."""
-    actionable = _get_today_entries()
+    actionable = next_steps_entries()
 
     if not actionable:
         print('\n  Nothing actionable today. Nice! 🎉\n')
@@ -118,7 +118,7 @@ def list_today() -> None:  # noqa: C901, PLR0912
 def snooze_today() -> None:
     """Snooze today's actionable items until tomorrow."""
     tomorrow = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
-    actionable = _get_today_entries()
+    actionable = next_steps_entries()
 
     if not actionable:
         print('Nothing to snooze — no actionable items today.')

@@ -19,8 +19,11 @@ from gtd.notion.log import (
     _is_recurring,
 )
 from gtd.notion.models import ProjectEntry
-from gtd.notion.entries import _get_today_entries
-from gtd.notion.triage import get_inbox_entries, inbox_filter
+from gtd.notion.views import (
+    inbox_entries,
+    inbox_filter,
+    next_steps_entries,
+)
 
 
 # --- _handle_response: maps HTTP codes to actionable errors ---
@@ -107,7 +110,7 @@ class TestExtractBlockText:
         assert _extract_block_text(block) is None
 
 
-# --- _get_today_entries: client-side filtering after Notion query ---
+# --- next_steps_entries: client-side filtering after Notion query ---
 
 
 def _make_page(
@@ -144,7 +147,7 @@ def _make_page(
 
 
 class TestGetTodayEntries:
-    @patch('gtd.notion.entries.query_database')
+    @patch('gtd.notion.views.query_database')
     def test_excludes_incomplete_entries(self, mock_db):
         """Items missing context or next_step are filtered out client-side."""
         mock_db.return_value = [
@@ -152,11 +155,11 @@ class TestGetTodayEntries:
             _make_page(header='No context', context='', next_step='Go'),
             _make_page(header='No step', context='Work', next_step=''),
         ]
-        results = _get_today_entries()
+        results = next_steps_entries()
         assert len(results) == 1
         assert results[0].header == 'Complete'
 
-    @patch('gtd.notion.entries.query_database')
+    @patch('gtd.notion.views.query_database')
     def test_recurring_items_shown_without_context_or_step(self, mock_db):
         """Recurring items surface even without context/next_step set.
 
@@ -173,7 +176,7 @@ class TestGetTodayEntries:
             ),
             _make_page(header='No context', context='', next_step='Go'),
         ]
-        results = _get_today_entries()
+        results = next_steps_entries()
         assert len(results) == 1
         assert results[0].header == 'Daily: Take out trash'
 
@@ -223,28 +226,28 @@ class TestTriageCatchesInvisibleItems:
     it won't show in Today. But it should never reach that state
     silently -- either it's in Triage (awaiting processing) or it
     has no status (just captured). Both cases are caught by
-    get_inbox_entries.
+    inbox_entries.
     """
 
-    @patch('gtd.notion.triage.query_database')
+    @patch('gtd.notion.views.query_database')
     def test_items_with_triage_status_appear(self, mock_db):
         mock_db.return_value = [
             _make_triage_page(header='Needs processing', status='Triage'),
         ]
-        results = get_inbox_entries()
+        results = inbox_entries()
         assert len(results) == 1
         assert results[0].header == 'Needs processing'
 
-    @patch('gtd.notion.triage.query_database')
+    @patch('gtd.notion.views.query_database')
     def test_items_with_no_status_appear(self, mock_db):
         mock_db.return_value = [
             _make_triage_page(header='Just captured', status=''),
         ]
-        results = get_inbox_entries()
+        results = inbox_entries()
         assert len(results) == 1
         assert results[0].header == 'Just captured'
 
-    @patch('gtd.notion.entries.query_database')
+    @patch('gtd.notion.views.query_database')
     def test_triage_items_never_appear_in_today(self, mock_db):
         """Items in Triage are invisible to Today -- by design.
 
@@ -267,7 +270,7 @@ class TestTriageCatchesInvisibleItems:
                 next_step='Do thing',
             ),
         ]
-        results = _get_today_entries()
+        results = next_steps_entries()
         assert len(results) == 1
         assert results[0].header == 'Properly triaged'
 
@@ -384,11 +387,11 @@ class TestProjectEntryFromPage:
         assert entry.success_condition == ''
 
 
-# --- get_inbox_entries: items missing ISO appear for triage ---
+# --- inbox_entries: items missing ISO appear for triage ---
 
 
 class TestTriageIncludesItemsMissingISO:
-    @patch('gtd.notion.triage.query_database')
+    @patch('gtd.notion.views.query_database')
     def test_items_missing_iso_appear_in_triage(self, mock_db):
         """Projects without an ISO must surface for triage."""
         mock_db.return_value = [
@@ -400,15 +403,15 @@ class TestTriageIncludesItemsMissingISO:
                 success_condition='',
             ),
         ]
-        results = get_inbox_entries()
+        results = inbox_entries()
         assert len(results) == 1
         assert results[0].header == 'No outcome set'
 
-    @patch('gtd.notion.triage.query_database')
+    @patch('gtd.notion.views.query_database')
     def test_filter_includes_iso_condition(self, mock_db):
         """The query sent to Notion must include an ISO-empty condition."""
         mock_db.return_value = []
-        get_inbox_entries()
+        inbox_entries()
         filter_obj = mock_db.call_args.kwargs.get('filter_obj', {})
         assert matches_notion_filter(
             filter_obj,
@@ -496,11 +499,22 @@ class TestInboxFilter:
             description
         )
 
-    def test_inbox_tab_uses_the_shared_filter(self):
-        """Weekly review triage list must equal the Inbox tab."""
+    def test_inbox_tab_uses_the_shared_definition(self):
+        """Weekly review triage list must equal the Inbox tab.
+
+        The tab can't hold its own copy of the filter any more -- it fetches
+        through `views.inbox_entries`, so both halves (the Notion filter and
+        the agenda exemption) come along automatically.
+        """
         from gtd.gtd_tui import InboxContent
 
-        assert InboxContent._build_filter(None) == inbox_filter()  # noqa: SLF001
+        entries = [object()]
+        with patch(
+            'gtd.notion.views.inbox_entries',
+            return_value=entries,
+        ) as fetch:
+            assert InboxContent._fetch(None) is entries  # noqa: SLF001
+        fetch.assert_called_once_with()
 
 
 # --- _entry_preview_text: outcome shown in fzf preview ---
@@ -548,7 +562,7 @@ class TestAgendaContexts:
 
         assert is_agenda_context(context) is expected
 
-    @patch('gtd.notion.triage.query_database')
+    @patch('gtd.notion.views.query_database')
     def test_triaged_agenda_item_is_not_inbox(self, mock_db):
         mock_db.return_value = [
             _make_triage_page(
@@ -559,9 +573,9 @@ class TestAgendaContexts:
                 success_condition='',
             ),
         ]
-        assert get_inbox_entries() == []
+        assert inbox_entries() == []
 
-    @patch('gtd.notion.triage.query_database')
+    @patch('gtd.notion.views.query_database')
     def test_untriaged_agenda_item_is_still_inbox(self, mock_db):
         """A `@Person` item still in Triage has not been processed yet."""
         mock_db.return_value = [
@@ -571,9 +585,9 @@ class TestAgendaContexts:
                 context='@Sam',
             ),
         ]
-        assert len(get_inbox_entries()) == 1
+        assert len(inbox_entries()) == 1
 
-    @patch('gtd.notion.triage.query_database')
+    @patch('gtd.notion.views.query_database')
     def test_statusless_agenda_item_is_still_inbox(self, mock_db):
         mock_db.return_value = [
             _make_triage_page(
@@ -582,9 +596,9 @@ class TestAgendaContexts:
                 context='@Sam',
             ),
         ]
-        assert len(get_inbox_entries()) == 1
+        assert len(inbox_entries()) == 1
 
-    @patch('gtd.notion.triage.query_database')
+    @patch('gtd.notion.views.query_database')
     def test_non_agenda_item_missing_fields_is_still_inbox(self, mock_db):
         mock_db.return_value = [
             _make_triage_page(
@@ -595,27 +609,26 @@ class TestAgendaContexts:
                 success_condition='',
             ),
         ]
-        assert len(get_inbox_entries()) == 1
+        assert len(inbox_entries()) == 1
 
-    def test_inbox_tab_applies_the_same_exemption(self):
-        """The TUI Inbox tab must agree with the CLI on what is inbox."""
+    @patch('gtd.notion.views.query_database')
+    def test_inbox_tab_applies_the_same_exemption(self, mock_db):
+        """The TUI Inbox tab must agree with the CLI on what is inbox.
+
+        A triaged agenda item is complete with just a context, so it must
+        not bounce back into the Inbox on either surface.
+        """
         from gtd.gtd_tui import InboxContent
-        from gtd.notion.triage import drop_triaged_agenda_items
 
-        assert InboxContent._post_filter is not None  # noqa: SLF001
-        entries = [
-            ProjectEntry.from_page(
-                _make_triage_page(
-                    header='Discuss budget',
-                    status='Current Project',
-                    context='@Sam',
-                )
+        mock_db.return_value = [
+            _make_triage_page(
+                header='Discuss budget',
+                status='Current Project',
+                context='@Sam',
             ),
         ]
-        assert InboxContent._post_filter(None, entries) == (  # noqa: SLF001
-            drop_triaged_agenda_items(entries)
-        )
-        assert InboxContent._post_filter(None, entries) == []  # noqa: SLF001
+
+        assert InboxContent._fetch(None) == []  # noqa: SLF001
 
 
 # --- @Person agenda items: the person lives in the header ---
@@ -649,7 +662,7 @@ class TestAgendaPersonFromHeader:
 
         assert agenda_person_from_header(header) == expected
 
-    @patch('gtd.notion.triage.query_database')
+    @patch('gtd.notion.views.query_database')
     def test_header_agenda_item_is_not_inbox_once_triaged(self, mock_db):
         """Context still empty, but the header names the person."""
         mock_db.return_value = [
@@ -661,9 +674,9 @@ class TestAgendaPersonFromHeader:
                 success_condition='',
             ),
         ]
-        assert get_inbox_entries() == []
+        assert inbox_entries() == []
 
-    @patch('gtd.notion.triage.query_database')
+    @patch('gtd.notion.views.query_database')
     def test_header_agenda_item_in_triage_still_appears(self, mock_db):
         mock_db.return_value = [
             _make_triage_page(
@@ -672,10 +685,10 @@ class TestAgendaPersonFromHeader:
                 context='',
             ),
         ]
-        assert len(get_inbox_entries()) == 1
+        assert len(inbox_entries()) == 1
 
     def test_is_agenda_entry_accepts_either_signal(self):
-        from gtd.notion.triage import is_agenda_entry
+        from gtd.notion.schema import is_agenda_entry
 
         by_header = ProjectEntry.from_page(
             _make_triage_page(header='@Sam: talk', context='')
@@ -707,25 +720,25 @@ class TestAgendaStatus:
         assert AGENDA_STATUS == 'Current Project'
         assert AGENDA_STATUS in STATUSES
 
-    @patch('gtd.notion.triage.query_database')
+    @patch('gtd.notion.views.query_database')
     def test_agenda_item_left_in_triage_still_needs_processing(self, mock_db):
         """Auto-status only applies during triage, not retroactively."""
         mock_db.return_value = [
             _make_triage_page(header='@Sam: talk', status='Triage'),
         ]
-        assert len(get_inbox_entries()) == 1
+        assert len(inbox_entries()) == 1
 
 
 class TestAgendaItemsAppearInNextSteps:
     """Agenda items must reach the Next Steps tab without a next_step.
 
-    `_get_today_entries` gates on `context and next_step`, which is exactly
+    `next_steps_entries` gates on `context and next_step`, which is exactly
     the field agenda items are exempt from providing. Exempting them in
     triage without exempting them here left "@Sam: raise the budget" visible
     on Projects but invisible on Next Steps -- actionable, and unfindable.
     """
 
-    @patch('gtd.notion.entries.query_database')
+    @patch('gtd.notion.views.query_database')
     def test_agenda_item_shown_without_next_step(self, mock_db):
         mock_db.return_value = [
             _make_page(
@@ -735,11 +748,11 @@ class TestAgendaItemsAppearInNextSteps:
                 status='Current Project',
             ),
         ]
-        results = _get_today_entries()
+        results = next_steps_entries()
         assert len(results) == 1
         assert results[0].header == '@Sam: raise the budget'
 
-    @patch('gtd.notion.entries.query_database')
+    @patch('gtd.notion.views.query_database')
     def test_agenda_item_shown_from_header_alone(self, mock_db):
         """Context may still be empty if the item was never triaged."""
         mock_db.return_value = [
@@ -750,11 +763,11 @@ class TestAgendaItemsAppearInNextSteps:
                 status='Current Project',
             ),
         ]
-        assert len(_get_today_entries()) == 1
+        assert len(next_steps_entries()) == 1
 
-    @patch('gtd.notion.entries.query_database')
+    @patch('gtd.notion.views.query_database')
     def test_non_agenda_item_still_needs_a_next_step(self, mock_db):
         mock_db.return_value = [
             _make_page(header='Vague', context='Work', next_step=''),
         ]
-        assert _get_today_entries() == []
+        assert next_steps_entries() == []

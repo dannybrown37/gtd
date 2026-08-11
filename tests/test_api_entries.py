@@ -14,6 +14,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from gtd import api
+from gtd.notion import views
 from gtd.notion.models import ProjectEntry
 
 if TYPE_CHECKING:
@@ -40,7 +41,7 @@ def make_entry(**overrides: object) -> ProjectEntry:
         'page_id': 'entry-1',
         'header': 'Ship the thing',
         'status': 'Current Project',
-        'context': '@Computer',
+        'context': 'Computer',
         'next_step': 'Draft the PR',
         'success_condition': 'Merged',
         'due_date': None,
@@ -58,9 +59,14 @@ def patch_query(
     monkeypatch: pytest.MonkeyPatch,
     entries: list[ProjectEntry],
 ) -> MagicMock:
-    """Stub `query_database` and return entries, bypassing page parsing."""
+    """Stub `query_database` and return entries, bypassing page parsing.
+
+    Both `api` and `gtd.notion.views` are stubbed: the view endpoints go
+    through `views`, the rest still query directly.
+    """
     query = MagicMock(return_value=[{'id': e.page_id} for e in entries])
     monkeypatch.setattr(api, 'query_database', query)
+    monkeypatch.setattr(views, 'query_database', query)
     monkeypatch.setattr(
         api.ProjectEntry,
         'from_page',
@@ -179,12 +185,12 @@ def test_entries_filters_by_context(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     entries = [
-        make_entry(page_id='a', context='@Computer'),
-        make_entry(page_id='b', context='@Phone'),
+        make_entry(page_id='a', context='Computer'),
+        make_entry(page_id='b', context='Phone'),
     ]
     patch_query(monkeypatch, entries)
     response = client.get(
-        '/entries?status=Current+Project&context=%40Phone',
+        '/entries?status=Current+Project&context=Phone',
         headers=auth_header,
     )
     assert [e['page_id'] for e in response.get_json()] == ['b']
@@ -209,12 +215,12 @@ def test_patch_entry_updates_only_supplied_fields(
     )
     response = client.patch(
         '/entry/page-1',
-        json={'context': '@Errands', 'due_date': '2026-09-01'},
+        json={'context': 'Errands', 'due_date': '2026-09-01'},
         headers=auth_header,
     )
     assert response.status_code == 200
     props = update.call_args[0][1]
-    assert props['Context'] == {'select': {'name': '@Errands'}}
+    assert props['Context'] == {'select': {'name': 'Errands'}}
     assert props['Due Date'] == {'date': {'start': '2026-09-01'}}
     # Nothing else should be touched — a PATCH is not a replace.
     assert set(props) == {'Context', 'Due Date'}
@@ -504,6 +510,131 @@ def test_a_future_due_date_does_not_defeat_a_snooze(
     )
 
     assert next_steps_headers(client, auth_header) == []
+
+
+# endregion
+
+
+# region /inbox, /contexts — views the API used to define for itself
+
+
+@pytest.mark.usefixtures('fixed_today')
+def test_inbox_includes_a_project_with_no_next_step(
+    client: FlaskClient,
+    auth_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`/inbox` was `Status == "Triage"` only.
+
+    A Current Project with no next action is the single most important
+    thing a GTD inbox surfaces, and the TUI has always shown it. On the
+    phone it was invisible, so the webapp reported inbox zero while the
+    TUI showed a backlog.
+    """
+    patch_query(
+        monkeypatch,
+        [make_entry(header='Stalled', next_step='')],
+    )
+
+    response = client.get('/inbox', headers=auth_header)
+
+    assert [e['header'] for e in response.get_json()] == ['Stalled']
+
+
+@pytest.mark.usefixtures('fixed_today')
+def test_inbox_drops_triaged_agenda_items(
+    client: FlaskClient,
+    auth_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The client-side half of the inbox definition reaches the API too."""
+    patch_query(
+        monkeypatch,
+        [make_entry(header='@Sam: budget', next_step='', context='@Sam')],
+    )
+
+    response = client.get('/inbox', headers=auth_header)
+
+    assert response.get_json() == []
+
+
+@pytest.mark.usefixtures('fixed_today')
+def test_next_steps_excludes_untriaged_entries(
+    client: FlaskClient,
+    auth_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`/next-steps` skipped the `context and next_step` gate entirely.
+
+    An item with no next action belongs in the inbox, not on a list of
+    things to do.
+    """
+    patch_query(
+        monkeypatch,
+        [
+            make_entry(header='Ready', page_id='a'),
+            make_entry(header='Stalled', page_id='b', next_step=''),
+        ],
+    )
+
+    assert next_steps_headers(client, auth_header) == ['Ready']
+
+
+@pytest.mark.usefixtures('fixed_today')
+def test_next_steps_keeps_recurring_and_agenda_entries(
+    client: FlaskClient,
+    auth_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Both are exempt from the gate — their header is the whole action."""
+    patch_query(
+        monkeypatch,
+        [
+            make_entry(
+                page_id='a',
+                header='Daily: trash',
+                status='Recurring',
+                context='',
+                next_step='',
+            ),
+            make_entry(page_id='b', header='@Sam: budget', next_step=''),
+        ],
+    )
+
+    assert sorted(next_steps_headers(client, auth_header)) == [
+        '@Sam: budget',
+        'Daily: trash',
+    ]
+
+
+@pytest.mark.usefixtures('fixed_today')
+def test_contexts_offers_only_contexts_next_steps_can_return(
+    client: FlaskClient,
+    auth_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Otherwise an item is unreachable through the context picker.
+
+    `/contexts` derived the view itself and missed the due-date escape
+    hatch, so an overdue-but-snoozed item was returned by
+    `/next-steps?context=X` under a context `/contexts` never listed.
+    """
+    patch_query(
+        monkeypatch,
+        [
+            make_entry(
+                page_id='a',
+                context='Errands',
+                due_date='2026-08-04',
+                follow_up_date='2026-08-20',
+            ),
+            make_entry(page_id='b', context='Nowhere', next_step=''),
+        ],
+    )
+
+    response = client.get('/contexts', headers=auth_header)
+
+    assert response.get_json()['contexts'] == ['Errands']
 
 
 # endregion

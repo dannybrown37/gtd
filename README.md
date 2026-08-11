@@ -240,7 +240,7 @@ your own token.
 | `PUT` | `/entry/<page_id>/notes` | Replace an entry's page body. Body: {"notes": "..."}. |
 | `POST` | `/entry/<page_id>/snooze` | Push an entry's follow-up date out. Mirrors the TUI's `T`. |
 | `GET` | `/icons/<path:filename>` | Serve the web app's PWA icons. |
-| `GET` | `/inbox` | Get all Triage entries (inbox). |
+| `GET` | `/inbox` | Get everything needing triage (inbox). |
 | `GET` | `/list-categories` | Return canonical list categories from Notion (for debugging/UI use). |
 | `POST` | `/list-categories` | Create a list category. Body: {"name": "..."}. Mirrors `+`. |
 | `DELETE` | `/list-categories/<name>` | Delete an empty list category. Mirrors the TUI's `-`. |
@@ -299,7 +299,8 @@ src/gtd/
 │   ├── review.py   # Weekly review and Someday/Maybe review flows.
 │   ├── schema.py   # GTD Notion database schema definition — single source of truth.
 │   ├── today.py    # Today view and snooze commands.
-│   └── triage.py   # Interactive triage flow for processing inbox items.
+│   ├── triage.py   # Interactive triage flow for processing inbox items.
+│   └── views.py    # The one definition of what each GTD view contains.
 └── webapp/
     └── icons/
 scripts/

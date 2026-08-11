@@ -18,6 +18,8 @@ if TYPE_CHECKING:
     from textual.events import Key
     from collections.abc import Callable, Iterable
 
+    from gtd.notion.models import ProjectEntry
+
 from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -39,7 +41,6 @@ from textual.widgets import (
 )
 from textual.widgets._footer import FooterKey, FooterLabel
 
-from gtd.notion.models import ProjectEntry
 from gtd.notion.schema import (
     AGENDA_CONTEXT_PREFIX,
     AGENDA_STATUS,
@@ -877,6 +878,10 @@ class BaseEntryContent(Vertical):
     TITLE: ClassVar[str] = ''
     EMPTY_MSG: ClassVar[str] = 'Nothing here.'
 
+    # What this tab shows, as an argument to `views.entries_for_status`.
+    VIEW_STATUS: ClassVar[str | list[str]] = ''
+    VIEW_FOLLOW_UP: ClassVar[str | None] = None
+
     BINDINGS: ClassVar[list[Binding]] = [
         Binding('X', 'complete_step', 'Complete Step', show=True),
     ]
@@ -919,25 +924,26 @@ class BaseEntryContent(Vertical):
     def on_mount(self) -> None:
         self._load_entries()
 
-    def _build_filter(self) -> dict:
-        raise NotImplementedError
+    def _fetch(self) -> list[ProjectEntry]:
+        """The entries this tab shows.
 
-    def _post_filter(self, entries: list[ProjectEntry]) -> list[ProjectEntry]:
-        """Narrow the fetched entries further, client-side.
-
-        For predicates Notion's filter language can't express.
+        Declare `VIEW_STATUS`/`VIEW_FOLLOW_UP` rather than overriding this;
+        override only when the view isn't a status query at all (Inbox,
+        Next Steps). Either way the definition itself lives in
+        `gtd.notion.views` -- never build a Notion filter here, or the tab
+        and the webapp start disagreeing about what the view contains.
         """
-        return entries
+        from gtd.notion.views import entries_for_status
+
+        return entries_for_status(
+            self.VIEW_STATUS,
+            follow_up=self.VIEW_FOLLOW_UP,
+        )
 
     @work(thread=True)
     def _load_entries(self) -> None:
-        from gtd.notion.client import query_database
-
         try:
-            pages = query_database(filter_obj=self._build_filter())
-            entries = self._post_filter(
-                [ProjectEntry.from_page(p) for p in pages]
-            )
+            entries = self._fetch()
             self.app.call_from_thread(self._set_entries, entries)
         except Exception as e:
             msg = f'Notion error: {e}'
@@ -1704,21 +1710,15 @@ async def _review_projects(app: App) -> int:
     from gtd.notion.client import (
         archive_page,
         build_property_update,
-        query_database,
         update_page,
     )
+    from gtd.notion.views import entries_for_status
 
     loop = asyncio.get_running_loop()
-    pages = await loop.run_in_executor(
+    entries = await loop.run_in_executor(
         None,
-        lambda: query_database(
-            filter_obj={
-                'property': 'Status',
-                'select': {'equals': 'Current Project'},
-            }
-        ),
+        lambda: entries_for_status('Current Project'),
     )
-    entries = [ProjectEntry.from_page(p) for p in pages]
     if not entries:
         app.notify('No current projects.')
         return 0
@@ -1877,21 +1877,15 @@ async def _review_waiting_for(app: App) -> int:
     """Browse Waiting For items. Returns count."""
     from gtd.notion.client import (
         build_property_update,
-        query_database,
         update_page,
     )
+    from gtd.notion.views import entries_for_status
 
     loop = asyncio.get_running_loop()
-    pages = await loop.run_in_executor(
+    entries = await loop.run_in_executor(
         None,
-        lambda: query_database(
-            filter_obj={
-                'property': 'Status',
-                'select': {'equals': 'Waiting For'},
-            }
-        ),
+        lambda: entries_for_status('Waiting For'),
     )
-    entries = [ProjectEntry.from_page(p) for p in pages]
     if not entries:
         app.notify('No Waiting For items.')
         return 0
@@ -1914,23 +1908,17 @@ async def _review_waiting_for(app: App) -> int:
 async def _review_someday(app: App) -> int:
     """Browse Someday/Maybe items — perusal, not per-item triage."""
     from gtd.notion.client import (
+        archive_page,
         build_property_update,
-        query_database,
         update_page,
     )
-    from gtd.notion.client import archive_page
+    from gtd.notion.views import entries_for_status
 
     loop = asyncio.get_running_loop()
-    pages = await loop.run_in_executor(
+    entries = await loop.run_in_executor(
         None,
-        lambda: query_database(
-            filter_obj={
-                'property': 'Status',
-                'select': {'equals': 'Someday/Maybe'},
-            }
-        ),
+        lambda: entries_for_status('Someday/Maybe'),
     )
-    entries = [ProjectEntry.from_page(p) for p in pages]
     if not entries:
         app.notify('Someday/Maybe is empty.')
         return 0
@@ -2388,22 +2376,10 @@ class NextStepsContent(BaseEntryContent):
         self._habit_items: list[WeeklyHabitItem] = []
         self._ctx_filter: str | None = None
 
-    def _build_filter(self) -> dict:
-        return {}
+    def _fetch(self) -> list[ProjectEntry]:
+        from gtd.notion.views import next_steps_entries
 
-    @work(thread=True)
-    def _load_entries(self) -> None:
-        from gtd.notion.entries import _get_today_entries
-
-        try:
-            entries = _get_today_entries()
-            self.app.call_from_thread(self._set_entries, entries)
-        except Exception as e:
-            msg = f'Notion error: {e}'
-            self.app.call_from_thread(
-                lambda: self.app.notify(msg, severity='error')
-            )
-            self.app.call_from_thread(self._set_entries, [])
+        return next_steps_entries()
 
     def _filtered_entries(self) -> list[ProjectEntry]:
         if self._ctx_filter:
@@ -2543,10 +2519,10 @@ class NextStepsContent(BaseEntryContent):
         inbox_entries: list[ProjectEntry] = []
         inbox_count = 0
         try:
-            from gtd.notion.triage import get_inbox_entries
+            from gtd.notion.views import inbox_entries
 
-            inbox_entries = await loop.run_in_executor(None, get_inbox_entries)
-            inbox_count = len(inbox_entries)
+            found = await loop.run_in_executor(None, inbox_entries)
+            inbox_count = len(found)
         except Exception:
             inbox_count = 0
 
@@ -2762,15 +2738,10 @@ class InboxContent(BaseEntryContent):
             return self._current_entry() is not None
         return None
 
-    def _build_filter(self) -> dict:
-        from gtd.notion.triage import inbox_filter
+    def _fetch(self) -> list[ProjectEntry]:
+        from gtd.notion.views import inbox_entries
 
-        return inbox_filter()
-
-    def _post_filter(self, entries: list[ProjectEntry]) -> list[ProjectEntry]:
-        from gtd.notion.triage import drop_triaged_agenda_items
-
-        return drop_triaged_agenda_items(entries)
+        return inbox_entries()
 
     def seed_entries(self, entries: list[ProjectEntry]) -> None:
         """Pre-populate entries (e.g. from weekly review flow)."""
@@ -2873,6 +2844,10 @@ class ProjectsContent(BaseEntryContent):
     """All active projects — Current Project and Waiting For."""
 
     TITLE: ClassVar[str] = 'Projects'
+    VIEW_STATUS: ClassVar[str | list[str]] = [
+        'Current Project',
+        'Waiting For',
+    ]
     EMPTY_MSG: ClassVar[str] = 'No active projects.'
 
     BINDINGS: ClassVar[list[Binding]] = [
@@ -2882,20 +2857,6 @@ class ProjectsContent(BaseEntryContent):
         Binding('D', 'mark_done', 'Done'),
         Binding('M', 'move_someday', 'Someday'),
     ]
-
-    def _build_filter(self) -> dict:
-        return {
-            'or': [
-                {
-                    'property': 'Status',
-                    'select': {'equals': 'Current Project'},
-                },
-                {
-                    'property': 'Status',
-                    'select': {'equals': 'Waiting For'},
-                },
-            ],
-        }
 
     async def _set_entries(self, entries: list[ProjectEntry]) -> None:
         entries.sort(
@@ -2949,6 +2910,7 @@ class RecurringContent(BaseEntryContent):
     """All recurring tasks — habits and repeating actions."""
 
     TITLE: ClassVar[str] = 'Recurring'
+    VIEW_STATUS: ClassVar[str | list[str]] = 'Recurring'
     EMPTY_MSG: ClassVar[str] = 'No recurring tasks.'
 
     BINDINGS: ClassVar[list[Binding]] = [
@@ -2956,9 +2918,6 @@ class RecurringContent(BaseEntryContent):
         Binding('N', 'edit_notes', 'Notes'),
         Binding('D', 'drop_entry', 'Drop'),
     ]
-
-    def _build_filter(self) -> dict:
-        return {'property': 'Status', 'select': {'equals': 'Recurring'}}
 
     async def _set_entries(self, entries: list[ProjectEntry]) -> None:
         entries = sorted(entries, key=lambda e: e.follow_up_date or '\xff')
@@ -2973,6 +2932,7 @@ class WaitingForContent(BaseEntryContent):
 
     TITLE: ClassVar[str] = 'Waiting For'
     EMPTY_MSG: ClassVar[str] = 'Nothing delegated.'
+    VIEW_STATUS: ClassVar[str | list[str]] = 'Waiting For'
 
     BINDINGS: ClassVar[list[Binding]] = [
         Binding('U', 'update_entry', 'Update'),
@@ -2980,12 +2940,6 @@ class WaitingForContent(BaseEntryContent):
         Binding('D', 'mark_done', 'Done'),
         Binding('A', 'activate', 'Activate'),
     ]
-
-    def _build_filter(self) -> dict:
-        return {
-            'property': 'Status',
-            'select': {'equals': 'Waiting For'},
-        }
 
 
 # ── Someday content ──────────────────────────────────────────────────────────
@@ -2995,6 +2949,7 @@ class SomedayContent(BaseEntryContent):
     """Someday/Maybe — ideas parked for later review, grouped by Area."""
 
     TITLE: ClassVar[str] = 'Someday'
+    VIEW_STATUS: ClassVar[str | list[str]] = 'Someday/Maybe'
     EMPTY_MSG: ClassVar[str] = 'No someday items.'
 
     BINDINGS: ClassVar[list[Binding]] = [
@@ -3026,12 +2981,6 @@ class SomedayContent(BaseEntryContent):
             self._notion_areas = get_areas()
         except Exception:
             self._notion_areas = []
-
-    def _build_filter(self) -> dict:
-        return {
-            'property': 'Status',
-            'select': {'equals': 'Someday/Maybe'},
-        }
 
     def _all_areas(self) -> list[str]:
         """Return all areas from Notion + any extras found on entries."""
@@ -3246,6 +3195,8 @@ class SnoozedContent(BaseEntryContent):
     """Items with a future follow-up date."""
 
     TITLE: ClassVar[str] = 'Incubation'
+    VIEW_STATUS: ClassVar[str | list[str]] = 'Current Project'
+    VIEW_FOLLOW_UP: ClassVar[str | None] = 'future'
     EMPTY_MSG: ClassVar[str] = 'Nothing in the future.'
 
     BINDINGS: ClassVar[list[Binding]] = [
@@ -3253,21 +3204,6 @@ class SnoozedContent(BaseEntryContent):
         Binding('N', 'edit_notes', 'Notes'),
         Binding('D', 'mark_done', 'Done'),
     ]
-
-    def _build_filter(self) -> dict:
-        today = datetime.now().strftime('%Y-%m-%d')
-        return {
-            'and': [
-                {
-                    'property': 'Status',
-                    'select': {'equals': 'Current Project'},
-                },
-                {
-                    'property': 'Follow-Up Date',
-                    'date': {'after': today},
-                },
-            ],
-        }
 
 
 # ── Lists content ────────────────────────────────────────────────────────────
@@ -3294,6 +3230,7 @@ class ListsContent(BaseEntryContent):
     """Curated reference lists backed by Notion (Status=List)."""
 
     TITLE: ClassVar[str] = 'Lists'
+    VIEW_STATUS: ClassVar[str | list[str]] = 'List'
     EMPTY_MSG: ClassVar[str] = 'No list items.'
 
     BINDINGS: ClassVar[list[Binding]] = [
@@ -3326,9 +3263,6 @@ class ListsContent(BaseEntryContent):
             self._notion_categories = get_list_categories()
         except Exception:
             self._notion_categories = []
-
-    def _build_filter(self) -> dict:
-        return {'property': 'Status', 'select': {'equals': 'List'}}
 
     async def _set_entries(self, entries: list[ProjectEntry]) -> None:
         entries.sort(
@@ -3761,24 +3695,9 @@ class GTDSearchProvider(Provider):
 
     @staticmethod
     def _fetch_all_entries() -> list[ProjectEntry]:
-        from gtd.notion.client import query_database
+        from gtd.notion.views import searchable_entries
 
-        pages = query_database(
-            filter_obj={
-                'or': [
-                    {'property': 'Status', 'select': {'equals': s}}
-                    for s in [
-                        'Triage',
-                        'Current Project',
-                        'Waiting For',
-                        'Recurring',
-                        'Someday/Maybe',
-                    ]
-                ]
-                + [{'property': 'Status', 'select': {'is_empty': True}}]
-            }
-        )
-        return [ProjectEntry.from_page(p) for p in pages]
+        return searchable_entries()
 
     async def search(self, query: str) -> Hits:
         matcher = self.matcher(query)

@@ -12,7 +12,6 @@ from dateutil import parser as dateparser
 
 
 __all__ = [
-    'is_due_today',
     'list_entries',
     'select_entry',
     'show_triage',
@@ -30,7 +29,7 @@ from gtd.notion.client import (
 )
 from gtd.notion.display import format_entry_list
 from gtd.notion.models import ProjectEntry
-from gtd.notion.schema import STATUSES, is_agenda_entry
+from gtd.notion.schema import STATUSES
 from gtd.ui import fzf_on_a_list, prompt_input
 
 
@@ -55,77 +54,6 @@ def _parse_date_input(raw: str) -> str | None:
         return parsed.strftime('%Y-%m-%d')
     print(f'  Could not parse "{raw}", skipping.')
     return None
-
-
-def _today_filter() -> dict:
-    """Build the Notion filter for today's actionable items.
-
-    An item surfaces when its tickler has come due (Follow-Up Date on or
-    before today, or never set) *or* when it is due today or overdue.
-
-    The Due Date disjunct is what stops a snooze from burying a commitment:
-    a Follow-Up Date is a note to yourself, a Due Date is a promise to
-    someone else, so the deadline has to outrank the deferral. Note the
-    asymmetry — an *unset* Due Date admits nothing, or every snoozed item
-    in the database would come back.
-    """
-    today = datetime.now().strftime('%Y-%m-%d')
-    active_statuses = ['Current Project', 'Recurring']
-    return {
-        'and': [
-            {
-                'or': [
-                    {'property': 'Status', 'select': {'equals': s}}
-                    for s in active_statuses
-                ],
-            },
-            {
-                'or': [
-                    {
-                        'property': 'Follow-Up Date',
-                        'date': {'on_or_before': today},
-                    },
-                    {
-                        'property': 'Follow-Up Date',
-                        'date': {'is_empty': True},
-                    },
-                    {
-                        'property': 'Due Date',
-                        'date': {'on_or_before': today},
-                    },
-                ],
-            },
-        ],
-    }
-
-
-def is_due_today(entry: ProjectEntry, today: str) -> bool:
-    """Should this entry surface today, given its tickler and its deadline?
-
-    The client-side twin of `_today_filter`'s date clause, for the callers
-    that filter in Python after a broader query (the HTTP API's
-    `/next-steps`). Both must agree or the TUI and the webapp disagree about
-    what "today" contains -- keep them in step.
-    """
-    if entry.due_date and entry.due_date <= today:
-        return True
-    return not entry.follow_up_date or entry.follow_up_date <= today
-
-
-def _get_today_entries() -> list[ProjectEntry]:
-    """Fetch and filter today's actionable entries."""
-    pages = query_database(filter_obj=_today_filter())
-    entries = [ProjectEntry.from_page(p) for p in pages]
-    # Recurring items and agenda items are described entirely by their
-    # header, so requiring a Next Actionable Step would hide them forever --
-    # they are exempt from providing one during triage.
-    return [
-        e
-        for e in entries
-        if e.status == 'Recurring'
-        or is_agenda_entry(e)
-        or (e.context and e.next_step)
-    ]
 
 
 def _escape_for_shell(text: str) -> str:

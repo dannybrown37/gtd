@@ -20,7 +20,8 @@ src/gtd/
 └── notion/
     ├── client.py   # Notion REST API client (httpx)
     ├── commands.py # GTD command implementations (update, defer, snooze, done)
-    ├── entries.py  # ProjectEntry fetching and filtering; _get_today_entries, _today_filter
+    ├── views.py    # THE definition of every view (next_steps_entries, inbox_entries, entries_for_status)
+    ├── entries.py  # fzf entry picker, preview text, interactive field editing
     ├── triage.py   # Triage flow logic; TRIAGE_STATUSES
     ├── capture.py  # Inbox capture
     ├── log.py      # Log & reschedule; _is_recurring, _infer_reschedule_days
@@ -31,11 +32,59 @@ src/gtd/
     └── init.py     # DB creation/upgrade; reads NOTION_PROJECTS_DB_ID + NOTION_NOTES_TOKEN env vars
 ```
 
+## View definitions
+
+**`notion/views.py` is the only place a view may be defined.** A "view" is
+the answer to *which entries belong on this list* — Next Steps, Inbox,
+Projects, Someday, one List category. Every surface (TUI tab, CLI command,
+HTTP endpoint, and through it the webapp) calls a function from there and
+renders the result.
+
+| function | used by |
+|---|---|
+| `next_steps_entries(today=None)` | Next Steps tab, `GET /next-steps`, `GET /contexts`, `gtd today` |
+| `inbox_entries()` | Inbox tab, `GET /inbox`, weekly review step 1, `gtd triage` |
+| `entries_for_status(status, *, context, list_category, follow_up, today)` | every other tab, `GET /entries`, `GET /list/<cat>`, review steps 2–4, `gtd done`/`defer`/`waiting` |
+| `searchable_entries()` | the command-palette search corpus — a union, not a view |
+
+Each view is expressed **twice, deliberately**: a Notion filter
+(`_today_filter`, `inbox_filter`, `status_filter`) that pre-narrows the
+query, and a Python predicate (`is_due_today`, `is_actionable`,
+`is_deferred`, `in_status_view`, `drop_triaged_agenda_items`) applied to
+whatever comes back. **The predicate is the definition; the filter is an
+optimisation.** Notion's filter language can't express parts of GTD at all
+(no `starts_with` on a select, so `@Person` contexts are unreachable
+server-side), so some rule always lives in Python — and a rule in Python is
+one that can be tested without a Notion double. A filter that is too loose
+therefore fetches too much rather than silently widening a view.
+
+Nothing in `views.py` sorts. Ordering is presentation and each surface
+applies its own.
+
+**Why this is a rule and not a preference.** `api.py` used to re-implement
+every one of these. `GET /inbox` was `Status == "Triage"` while the TUI
+meant six clauses more, so the phone reported inbox zero while the TUI
+showed a backlog — most importantly hiding a Current Project with no next
+action, the single thing a GTD inbox exists to surface. `GET /next-steps`
+omitted the `context and next_step` gate. `GET /contexts` derived the same
+view a fourth way and missed the due-date escape hatch, so
+`/next-steps?context=X` could return items under a context the picker never
+offered. `GET /list/<cat>` filtered on category without `Status == 'List'`.
+All four shipped and all four passed CI, because
+`tests/test_webapp_parity.py` compares *action names* and has nothing to
+say about what a list contains.
+
+`tests/test_view_definitions.py` is the guard: `'property': 'Status'` may
+appear in exactly one module, no consumer may parse a page result set, every
+tab must declare `VIEW_STATUS` or override `_fetch`, and each view endpoint
+must call its named view function. If you need a new view, add it to
+`views.py` — do not inline a filter at the call site, the test will fail.
+
 ## TUI Layout (GTDApp)
 
 Tabs: **Next Steps | Inbox | Projects | Waiting For | Incubation | Recurring | Someday | Lists**
 
-All entry tabs extend `BaseEntryContent(Vertical)` with stable IDs (`#entry-list`, `#entry-detail`, etc.) and shared infrastructure. Override `_build_filter()` to define what Notion entries appear. `NextStepsContent` (the home tab) overrides `_load_entries()` entirely (uses `_get_today_entries()`) rather than using `_build_filter()`.
+All entry tabs extend `BaseEntryContent(Vertical)` with stable IDs (`#entry-list`, `#entry-detail`, etc.) and shared infrastructure. A tab declares **which** view it shows (`VIEW_STATUS`, optionally `VIEW_FOLLOW_UP`) and the base class fetches it via `views.entries_for_status`; a tab whose view isn't a status query overrides `_fetch()` to call another function from `notion/views.py` (`InboxContent` → `inbox_entries()`, `NextStepsContent` → `next_steps_entries()`). **Never build a Notion filter in a tab** — see [View definitions](#view-definitions).
 
 There used to be a separate "Today" tab and "Next Steps" tab; they were merged (2026-07-30) because they were nearly identical — the only real differences were that Today applied a follow-up-date filter (hiding snoozed items) that Next Steps lacked, and only Today carried the Weekly Review habit row. `NextStepsContent` is what `TodayContent` used to be, renamed and promoted to the first/home tab; the old separate `NextStepsContent` (a plain `Current Project` + due-`Recurring` filter with no date restriction) was deleted outright, along with the now-unused `_active_recurring_filter`/`_recurring_due_clauses` helpers in `notion/entries.py` it was the only caller of.
 
@@ -84,8 +133,8 @@ A header starting with `@Name` (`@Sam: raise the budget`) declares an *agenda it
 
 **Exempting agenda items from a field means fixing every consumer that requires it.** This bit twice — the pattern to watch for:
 
-- `inbox_filter()` counts an empty next step / success condition as "needs triage" → agenda items never leave the Inbox. Notion select filters have no `starts_with`, so this **cannot** be expressed server-side; `drop_triaged_agenda_items()` applies it client-side, and **every caller of `inbox_filter()` must too** (`get_inbox_entries()`, `InboxContent._post_filter()`). Items still in Triage/statusless are deliberately kept.
-- `_get_today_entries()` (`notion/entries.py`) gates on `context and next_step` → agenda items showed on Projects but not Next Steps. `is_agenda_entry` is now an escape hatch there alongside `Recurring`, which exists for the identical reason.
+- `inbox_filter()` counts an empty next step / success condition as "needs triage" → agenda items never leave the Inbox. Notion select filters have no `starts_with`, so this **cannot** be expressed server-side; `drop_triaged_agenda_items()` applies it client-side. Both halves now live inside `inbox_entries()`, so no caller can apply one without the other. Items still in Triage/statusless are deliberately kept.
+- `is_actionable()` (`notion/views.py`) gates on `context and next_step` → agenda items showed on Projects but not Next Steps. `is_agenda_entry` is an escape hatch there alongside `Recurring`, which exists for the identical reason.
 - `NextStepListItem._format` printed a dim `(no step)` placeholder above the real content. Agenda rows now render single-line with `→` and the person stripped.
 
 **Triaging to Someday/Maybe asks for Area, not Context** — and asks for nothing else. A parked idea has no next action, no due date, and no context (Context = "what tool do I need to act on this"); the Someday tab groups by `Area`, so that's the only field triage collects, then it saves and returns. This means `inbox_filter()` must exempt `Someday/Maybe` from its empty-context/next-step/success-condition clauses (it does, server-side via `not_someday`) or every Someday item bounces straight back into the Inbox — the same trap agenda items hit.
@@ -98,7 +147,7 @@ Skipping the Status prompt also removed the inline *Delete* option for agenda it
 
 **`SelectModal(..., hidden_prefix='@')`** (`tui.py`) keeps `@Person` contexts out of the browse list until the query contains `@`; the placeholder advertises it. Applied to the context pickers (triage + update), deliberately **not** to `action_filter_context` — filtering to "everything for one person" is a real use, and that list only contains contexts present in the current view.
 
-`BaseEntryContent._post_filter(entries)` is the general hook for narrowing fetched entries client-side, for predicates Notion's filter language can't express. Default is identity; only `InboxContent` overrides it.
+`BaseEntryContent._fetch()` is the hook for a tab whose view isn't a plain status query. It must return the result of a `notion/views.py` function, never a query the tab composes itself.
 
 ### Waiting For tab (Weekly Review)
 

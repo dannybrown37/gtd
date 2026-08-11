@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from gtd import api
+from gtd.notion import views
 from gtd.notion.models import ProjectEntry
 
 if TYPE_CHECKING:
@@ -141,7 +142,7 @@ def test_list_by_category_returns_entries(
         MagicMock(return_value=['Books to Read', 'Movies']),
     )
     monkeypatch.setattr(
-        api,
+        views,
         'query_database',
         MagicMock(return_value=[mock_entry]),
     )
@@ -183,7 +184,7 @@ def test_list_by_category_case_insensitive(
         MagicMock(return_value=['Books to Read']),
     )
     monkeypatch.setattr(
-        api,
+        views,
         'query_database',
         MagicMock(return_value=[]),
     )

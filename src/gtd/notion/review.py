@@ -7,7 +7,6 @@ from gtd.notion.client import (
     archive_page,
     build_property_update,
     get_page_body,
-    query_database,
     update_page,
 )
 from gtd.notion.entries import (
@@ -17,20 +16,14 @@ from gtd.notion.entries import (
     update_entry_by_ref,
 )
 from gtd.notion.log import _confirm_delete
-from gtd.notion.models import ProjectEntry
-from gtd.notion.triage import get_inbox_entries, process_triage
+from gtd.notion.triage import process_triage
+from gtd.notion.views import entries_for_status, inbox_entries
 from gtd.ui import fzf_on_a_list, pause
 
 
 def review_someday() -> None:  # noqa: C901
     """Review Someday/Maybe items — keep, activate, or drop each."""
-    pages = query_database(
-        filter_obj={
-            'property': 'Status',
-            'select': {'equals': 'Someday/Maybe'},
-        },
-    )
-    entries = [ProjectEntry.from_page(p) for p in pages]
+    entries = entries_for_status('Someday/Maybe')
 
     if not entries:
         print('No Someday/Maybe items. 🎉')
@@ -119,7 +112,7 @@ def _review_get_clear() -> None:
     print('─── Phase 1: Get Clear ───')
     print('  Goal: Empty your inbox. Process every item.\n')
 
-    triage_items = get_inbox_entries()
+    triage_items = inbox_entries()
     if triage_items:
         summary_lines = [
             f'── Triage Inbox ({len(triage_items)} items) ──',
@@ -147,13 +140,7 @@ def _review_get_current() -> None:  # noqa: C901, PLR0912, PLR0915
     print('─── Phase 2: Get Current ───')
     print('  Goal: Review every active project. Is the next action right?\n')
 
-    current_pages = query_database(
-        filter_obj={
-            'property': 'Status',
-            'select': {'equals': 'Current Project'},
-        },
-    )
-    current_entries = [ProjectEntry.from_page(p) for p in current_pages]
+    current_entries = entries_for_status('Current Project')
 
     if not current_entries:
         print('  No current projects.\n')
@@ -211,13 +198,7 @@ def _review_get_current() -> None:  # noqa: C901, PLR0912, PLR0915
             print(f'  {updated} project(s) updated\n')
 
     # Someday/Maybe review
-    someday_pages = query_database(
-        filter_obj={
-            'property': 'Status',
-            'select': {'equals': 'Someday/Maybe'},
-        },
-    )
-    someday_entries = [ProjectEntry.from_page(p) for p in someday_pages]
+    someday_entries = entries_for_status('Someday/Maybe')
 
     if not someday_entries:
         print('  No Someday/Maybe items.\n')
