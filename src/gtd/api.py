@@ -21,11 +21,15 @@ from dateutil import parser as dateparser
 
 from gtd.notion.capture import _create_page
 from gtd.notion.client import (
+    add_area,
     build_property_update,
+    get_areas,
     get_contexts,
     get_list_categories,
     get_page_body,
     query_database,
+    remove_area,
+    rename_area,
     replace_page_body,
     update_page,
     archive_page,
@@ -309,6 +313,95 @@ def _apply_triage_updates(
 # endregion Triage Helpers
 
 # Endpoint definitions should be alphabetical
+
+
+def _resolve_area(name: str) -> tuple[str | None, list[str]]:
+    """Map `name` to its canonical Area, case-insensitively.
+
+    Returns `(canonical_or_None, all_areas)` so callers can 404 on an unknown
+    area without fetching the list twice.
+    """
+    available = get_areas()
+    return {a.lower(): a for a in available}.get(name.strip().lower()), (
+        available
+    )
+
+
+@app.get('/areas')
+@require_auth
+def areas() -> Any:
+    """List the Areas of Focus. Mirrors the TUI's Someday tab grouping."""
+    try:
+        return jsonify(areas=sorted(get_areas()))
+    except Exception:
+        logger.exception('Failed to fetch areas for /areas')
+        return jsonify(error='Could not retrieve areas'), 500
+
+
+@app.post('/areas')
+@require_auth
+def post_area() -> Any:
+    """Create an Area of Focus. Body: {"name": "..."}. Mirrors `+`."""
+    body = request.get_json(force=True, silent=True) or {}
+    name = (body.get('name') or '').strip()
+    if not name:
+        return jsonify(error='name is required'), 400
+    try:
+        existing, _ = _resolve_area(name)
+        if existing:
+            return jsonify(error=f'Area "{existing}" already exists'), 409
+        add_area(name)
+        return jsonify(areas=sorted(get_areas())), 201
+    except Exception:
+        logger.exception('Failed to add area %s', name)
+        return jsonify(error='Could not add area'), 500
+
+
+@app.delete('/areas/<name>')
+@require_auth
+def delete_area(name: str) -> Any:
+    """Delete an Area of Focus. Mirrors the TUI's `-`."""
+    try:
+        canonical, _ = _resolve_area(unquote_plus(name))
+        if not canonical:
+            return jsonify(error=f'Unknown area "{name}"'), 404
+        remove_area(canonical)
+        return jsonify(areas=sorted(get_areas())), 200
+    except Exception:
+        logger.exception('Failed to remove area %s', name)
+        return jsonify(error='Could not remove area'), 500
+
+
+@app.patch('/areas/<name>')
+@require_auth
+def patch_area(name: str) -> Any:
+    """Rename an Area of Focus. Body: {"new_name": "..."}. Mirrors `)`."""
+    body = request.get_json(force=True, silent=True) or {}
+    new_name = (body.get('new_name') or '').strip()
+    if not new_name:
+        return jsonify(error='new_name is required'), 400
+    try:
+        canonical, available = _resolve_area(unquote_plus(name))
+        if not canonical:
+            return jsonify(error=f'Unknown area "{name}"'), 404
+        collision = {a.lower() for a in available} - {canonical.lower()}
+        if new_name.lower() in collision:
+            return jsonify(error=f'Area "{new_name}" already exists'), 409
+        # Entries keep the old value after the option is renamed, so collect
+        # them first and rewrite each one.
+        pages = query_database(
+            filter_obj={
+                'property': 'Area',
+                'select': {'equals': canonical},
+            },
+        )
+        rename_area(canonical, new_name)
+        for page in pages:
+            update_page(page['id'], build_property_update(area=new_name))
+        return jsonify(areas=sorted(get_areas())), 200
+    except Exception:
+        logger.exception('Failed to rename area %s', name)
+        return jsonify(error='Could not rename area'), 500
 
 
 @app.get('/inbox')

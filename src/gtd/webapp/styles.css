@@ -157,6 +157,52 @@ body {
   margin-top: 4px;
 }
 
+/* Area sections on Someday/Maybe — the webapp's answer to the TUI's grouped
+   left pane, with the per-area rename/remove keys as tappable buttons. */
+.group-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 4px 2px;
+}
+
+.group-label {
+  font-weight: 700;
+  font-size: 0.8rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.group-count {
+  flex: 1;
+  color: var(--text-dim);
+  font-size: 0.75rem;
+}
+
+.group-btn {
+  flex: none;
+  min-width: 44px;
+  min-height: 44px;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 1rem;
+}
+
+.group-add {
+  padding: 10px 0 4px;
+}
+
+.group-add-btn {
+  width: 100%;
+  min-height: 44px;
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  background: none;
+  color: var(--text-dim);
+  font-size: 0.9rem;
+}
+
 .chevron {
   flex: none;
   color: var(--text-dim);

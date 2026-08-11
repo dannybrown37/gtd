@@ -172,7 +172,7 @@ Two-mode design: opens in **browse mode** (ListView focused, j/k navigate). **Ta
 - `gtd areas add "Health"` — add new area; duplicate names rejected (case-insensitive)
 - `gtd areas remove "Health"` — remove area by name (case-insensitive)
 
-**TUI**: the Someday/Maybe tab also manages areas directly (`+`/`-`/`)` keys) — CLI and TUI both operate on the same Notion select options, so neither is authoritative over the other.
+**TUI**: the Someday/Maybe tab also manages areas directly (`+`/`-`/`)` keys). **Webapp**: the Someday view manages them too (see [Webapp](#webapp-srcgtdwebapp)). CLI, TUI and webapp all operate on the same Notion select options, so none is authoritative over the others.
 
 ## Key Models
 
@@ -252,8 +252,21 @@ hand-maintained lists compared to each other would drift together and always pas
 When you add a TUI binding, either implement it in the webapp and add its action name to
 `CAPABILITIES`, or add it to `TUI_ONLY` in the test **with a reason**. `TUI_ONLY` is for
 things that genuinely can't cross (keyboard navigation, `quit`) and for deliberately
-deferred scope — currently the Weekly Review, Area CRUD, and List-category CRUD, all of
-which the TUI has and the webapp does not.
+deferred scope — currently the Weekly Review and List-category CRUD, which the TUI has
+and the webapp does not.
+
+**Areas of Focus in the webapp** — the Someday view has its own loader (`loadSomeday`,
+`kind: 'someday'`) rather than the generic `/entries` one, because it has to group by
+Area the way the TUI's left pane does. Area chips filter the list; with *All* selected
+the list renders Area section headers (every known Area, empty ones included, then a
+trailing `(no area)` bucket) carrying ✎/✕ for rename/remove, plus a `+ New area` row.
+Assigning an Area is a row in the entry action sheet. All four map to the TUI's `(`,
+`+`, `-`, `)` and are backed by `/areas` (see the README's endpoint table) — except
+assignment, which is just `PATCH /entry/<id> {"area": ...}`.
+
+`PATCH /areas/<name>` renames the Notion select option **and** rewrites every entry
+still carrying the old value, mirroring `action_rename_area`; renaming the option alone
+leaves entries pointing at a value that no longer exists.
 
 Webapp structure: `VIEWS` in `app.js` maps one entry per TUI tab; a single generic list
 view renders them all, backed by `GET /entries?status=…`. Per-entry actions live in an

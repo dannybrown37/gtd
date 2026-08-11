@@ -21,7 +21,16 @@ const CAPABILITIES = [
   'activate',
   'capture',
   'refresh',
+  'set_area',
+  'add_area',
+  'remove_area',
+  'rename_area',
 ];
+
+// Chip value standing in for "entries with no Area at all"; the empty string
+// is already taken by the All chip. Area names are trimmed server-side, so a
+// real one can never start with a space.
+const NO_AREA = ' (no area)';
 
 // Each view is a tab in the TUI. `status`/`followUp` drive the generic
 // /entries endpoint; `kind` selects the loader for the ones that differ.
@@ -33,7 +42,7 @@ const VIEWS = {
   'waiting-for': { label: 'Waiting For',   kind: 'entries', status: 'Waiting For' },
   'incubation':  { label: 'Incubation',    kind: 'entries', status: 'Current Project', followUp: 'future' },
   'recurring':   { label: 'Recurring',     kind: 'entries', status: 'Recurring' },
-  'someday':     { label: 'Someday/Maybe', kind: 'entries', status: 'Someday/Maybe' },
+  'someday':     { label: 'Someday/Maybe', kind: 'someday',  status: 'Someday/Maybe' },
   'lists':       { label: 'Lists',         kind: 'lists' },
 };
 
@@ -56,6 +65,8 @@ const state = {
   activeView: 'next-steps',
   currentContext: '',
   currentCategory: '',
+  currentArea: '',
+  areas: [],
   schema: null,
   entries: [],
 };
@@ -216,6 +227,7 @@ function switchView(view) {
   state.activeView = view;
   state.currentContext = '';
   state.currentCategory = '';
+  state.currentArea = '';
   $('#view-title').textContent = VIEWS[view].label;
   const isCapture = VIEWS[view].kind === 'capture';
   $('#view-capture').classList.toggle('hidden', !isCapture);
@@ -233,30 +245,83 @@ function setEmpty(message) {
   empty.classList.toggle('hidden', !message);
 }
 
+function entryRow(entry, onTap) {
+  const li = document.createElement('li');
+  li.className = 'entry';
+  li.dataset.pageId = entry.page_id;
+  const bits = [
+    entry.context,
+    entry.area,
+    entry.due_date && `due ${formatDate(entry.due_date)}`,
+    entry.follow_up_date && `→ ${formatDate(entry.follow_up_date)}`,
+  ].filter(Boolean);
+  li.innerHTML = `
+    <div class="entry-main">
+      <div class="entry-header">${escapeHtml(entry.header)}</div>
+      ${entry.next_step ? `<div class="entry-sub">${escapeHtml(entry.next_step)}</div>` : ''}
+      ${bits.length ? `<div class="entry-meta">${escapeHtml(bits.join(' · '))}</div>` : ''}
+    </div>
+    <span class="chevron" aria-hidden="true">›</span>
+  `;
+  li.addEventListener('click', () => onTap(entry, li));
+  return li;
+}
+
 function renderEntries(entries, { onTap }) {
   const list = $('#entry-list');
   list.innerHTML = '';
-  entries.forEach((entry) => {
+  entries.forEach((entry) => list.appendChild(entryRow(entry, onTap)));
+}
+
+// The TUI's Someday pane lists every known Area as a section header — empty
+// ones included, so an Area you just made is visibly there — with the
+// unassigned entries in a trailing bucket. Section headers carry the rename
+// and remove affordances the TUI binds to `)` and `-`.
+function renderAreaSections(entries, areas, { onTap }) {
+  const list = $('#entry-list');
+  list.innerHTML = '';
+
+  const section = (label, count, area) => {
     const li = document.createElement('li');
-    li.className = 'entry';
-    li.dataset.pageId = entry.page_id;
-    const bits = [
-      entry.context,
-      entry.area,
-      entry.due_date && `due ${formatDate(entry.due_date)}`,
-      entry.follow_up_date && `→ ${formatDate(entry.follow_up_date)}`,
-    ].filter(Boolean);
+    li.className = 'group-header';
     li.innerHTML = `
-      <div class="entry-main">
-        <div class="entry-header">${escapeHtml(entry.header)}</div>
-        ${entry.next_step ? `<div class="entry-sub">${escapeHtml(entry.next_step)}</div>` : ''}
-        ${bits.length ? `<div class="entry-meta">${escapeHtml(bits.join(' · '))}</div>` : ''}
-      </div>
-      <span class="chevron" aria-hidden="true">›</span>
+      <span class="group-label">${escapeHtml(label)}</span>
+      <span class="group-count">${count ? count : '(empty)'}</span>
+      ${
+        area
+          ? `<button class="group-btn" data-act="rename" aria-label="Rename ${escapeHtml(area)}">✎</button>
+             <button class="group-btn" data-act="remove" aria-label="Remove ${escapeHtml(area)}">✕</button>`
+          : ''
+      }
     `;
-    li.addEventListener('click', () => onTap(entry, li));
+    if (area) {
+      li.querySelector('[data-act="rename"]').addEventListener('click', () =>
+        openRenameAreaModal(area)
+      );
+      li.querySelector('[data-act="remove"]').addEventListener('click', () =>
+        confirmRemoveArea(area, count)
+      );
+    }
     list.appendChild(li);
+  };
+
+  areas.forEach((area) => {
+    const items = entries.filter((e) => e.area === area);
+    section(area, items.length, area);
+    items.forEach((entry) => list.appendChild(entryRow(entry, onTap)));
   });
+
+  const unassigned = entries.filter((e) => !e.area);
+  if (unassigned.length) {
+    section('(no area)', unassigned.length, null);
+    unassigned.forEach((entry) => list.appendChild(entryRow(entry, onTap)));
+  }
+
+  const add = document.createElement('li');
+  add.className = 'group-add';
+  add.innerHTML = '<button class="group-add-btn">+ New area</button>';
+  add.querySelector('button').addEventListener('click', openNewAreaModal);
+  list.appendChild(add);
 }
 
 function removeEntryRow(pageId) {
@@ -293,6 +358,7 @@ function loadActiveView() {
   if (view.kind === 'next-steps') return loadNextSteps();
   if (view.kind === 'inbox') return loadInbox();
   if (view.kind === 'lists') return loadLists();
+  if (view.kind === 'someday') return loadSomeday();
   return loadEntries(view);
 }
 
@@ -361,6 +427,50 @@ async function loadInbox() {
   }
 }
 
+async function loadSomeday() {
+  try {
+    ({ areas: state.areas } = await apiFetch('/areas'));
+  } catch (err) {
+    // Areas are the grouping, not the data; a failure degrades to a flat list.
+    state.areas = [];
+  }
+  try {
+    state.entries = await apiFetch(
+      `/entries?status=${encodeURIComponent('Someday/Maybe')}`
+    );
+  } catch (err) {
+    reportError(err);
+    return;
+  }
+
+  const hasUnassigned = state.entries.some((e) => !e.area);
+  renderChips(
+    [
+      { value: '', label: 'All' },
+      ...state.areas.map((a) => ({ value: a, label: a })),
+      ...(hasUnassigned ? [{ value: NO_AREA, label: '(no area)' }] : []),
+    ],
+    state.currentArea,
+    (value) => {
+      state.currentArea = value;
+      loadSomeday();
+    }
+  );
+
+  if (state.currentArea) {
+    const shown = state.entries.filter((e) =>
+      state.currentArea === NO_AREA ? !e.area : e.area === state.currentArea
+    );
+    renderEntries(shown, { onTap: openActionSheet });
+    setEmpty(shown.length ? '' : 'Nothing in this area');
+    return;
+  }
+  renderAreaSections(state.entries, state.areas, { onTap: openActionSheet });
+  setEmpty(
+    state.entries.length || state.areas.length ? '' : 'No someday items'
+  );
+}
+
 async function loadLists() {
   let categories;
   try {
@@ -408,6 +518,7 @@ function openActionSheet(entry) {
       <button class="action-btn" data-act="steps">Edit next step</button>
       <button class="action-btn" data-act="notes">Notes</button>
       <button class="action-btn" data-act="snooze">Snooze</button>
+      ${isSomeday ? '<button class="action-btn" data-act="area">Assign Area</button>' : ''}
       ${isSomeday ? '<button class="action-btn" data-act="activate">Activate</button>' : ''}
       ${!isSomeday && !isList ? '<button class="action-btn" data-act="someday">Move to Someday</button>' : ''}
       <button class="action-btn" data-act="list">Move to a List</button>
@@ -426,6 +537,7 @@ function openActionSheet(entry) {
       if (act === 'steps') openStepsModal(entry);
       if (act === 'notes') openNotesModal(entry);
       if (act === 'snooze') openSnoozeModal(entry);
+      if (act === 'area') openAreaPicker(entry);
       if (act === 'activate') setStatus(entry, 'Current Project');
       if (act === 'someday') setStatus(entry, 'Someday/Maybe');
       if (act === 'list') openMoveToListModal(entry);
@@ -643,6 +755,124 @@ async function openMoveToListModal(entry) {
     );
   });
 }
+
+// region Areas of Focus
+
+async function openAreaPicker(entry) {
+  let areas;
+  try {
+    ({ areas } = await apiFetch('/areas'));
+  } catch (err) {
+    reportError(err);
+    return;
+  }
+  openModal(`
+    <h2>Assign Area</h2>
+    <div class="option-grid">
+      ${['(no area)', ...areas]
+        .map(
+          (a) =>
+            `<button type="button" class="option-btn${a === (entry.area || '(no area)') ? ' active' : ''}" data-value="${escapeHtml(a)}">${escapeHtml(a)}</button>`
+        )
+        .join('')}
+    </div>
+    <div class="modal-actions">
+      <button class="secondary-btn" id="area-back">Back</button>
+    </div>
+  `);
+  $('#area-back').addEventListener('click', () => openActionSheet(entry));
+  modal.querySelectorAll('.option-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const value = btn.dataset.value;
+      patchEntry(
+        entry,
+        { area: value === '(no area)' ? '' : value },
+        `Area set to ${value}`
+      );
+    });
+  });
+}
+
+async function areaRequest(path, options, successMessage) {
+  try {
+    await apiFetch(path, options);
+    closeModal();
+    showToast(successMessage);
+    loadActiveView();
+  } catch (err) {
+    reportError(err);
+  }
+}
+
+function openNewAreaModal() {
+  openModal(`
+    <h2>New area</h2>
+    <input id="area-name" type="text" placeholder="Area name" />
+    <div class="modal-actions">
+      <button class="secondary-btn" id="area-cancel">Cancel</button>
+      <button class="primary-btn" id="area-save">Add</button>
+    </div>
+  `);
+  $('#area-name').focus();
+  $('#area-cancel').addEventListener('click', closeModal);
+  $('#area-save').addEventListener('click', () => {
+    const name = $('#area-name').value.trim();
+    if (!name) return;
+    areaRequest(
+      '/areas',
+      { method: 'POST', body: JSON.stringify({ name }) },
+      `Added area "${name}"`
+    );
+  });
+}
+
+function openRenameAreaModal(area) {
+  openModal(`
+    <h2>Rename area</h2>
+    <input id="area-name" type="text" value="${escapeHtml(area)}" />
+    <div class="modal-actions">
+      <button class="secondary-btn" id="area-cancel">Cancel</button>
+      <button class="primary-btn" id="area-save">Rename</button>
+    </div>
+  `);
+  $('#area-name').focus();
+  $('#area-cancel').addEventListener('click', closeModal);
+  $('#area-save').addEventListener('click', () => {
+    const newName = $('#area-name').value.trim();
+    if (!newName || newName === area) return closeModal();
+    areaRequest(
+      `/areas/${encodeURIComponent(area)}`,
+      { method: 'PATCH', body: JSON.stringify({ new_name: newName }) },
+      `Renamed to "${newName}"`
+    );
+  });
+}
+
+function confirmRemoveArea(area, count) {
+  openModal(`
+    <h2>Remove area?</h2>
+    <p class="entry-meta">${escapeHtml(area)}</p>
+    <p class="entry-meta">${
+      count
+        ? `${count} item(s) will lose their area.`
+        : 'It has no items.'
+    }</p>
+    <div class="modal-actions">
+      <button class="secondary-btn" id="area-cancel">Cancel</button>
+      <button class="primary-btn danger-action" id="area-remove">Remove</button>
+    </div>
+  `);
+  $('#area-cancel').addEventListener('click', closeModal);
+  $('#area-remove').addEventListener('click', () =>
+    areaRequest(
+      `/areas/${encodeURIComponent(area)}`,
+      { method: 'DELETE' },
+      `Removed area "${area}"`
+    )
+  );
+}
+
+// endregion
 
 function openRescheduleModal(entry) {
   openModal(`

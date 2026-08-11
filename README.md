@@ -227,6 +227,10 @@ your own token.
 | --- | --- | --- |
 | `GET` | `/` | Serve the mobile web app shell. |
 | `GET` | `/app.js` | Serve the web app's client-side JS. |
+| `GET` | `/areas` | List the Areas of Focus. Mirrors the TUI's Someday tab grouping. |
+| `POST` | `/areas` | Create an Area of Focus. Body: {"name": "..."}. Mirrors `+`. |
+| `DELETE` | `/areas/<name>` | Delete an Area of Focus. Mirrors the TUI's `-`. |
+| `PATCH` | `/areas/<name>` | Rename an Area of Focus. Body: {"new_name": "..."}. Mirrors `)`. |
 | `POST` | `/capture` | Add an item to the inbox. Body: {"header": "..."}. |
 | `GET` | `/contexts` | Get active contexts. |
 | `POST` | `/done/<page_id>` | Mark an entry done (archives the page). |
