@@ -76,17 +76,22 @@ jobs:
               echo "uv not found at \$UV — was the VM bootstrapped?" >&2
               exit 1
             fi
-            # PyPI's CDN can lag the publish job by a few seconds; retry rather
-            # than fail a deploy that would succeed moments later.
+            # --refresh-package is not optional: uv caches PyPI's simple index
+            # per its Cache-Control, and the VM's cache persists between
+            # deploys. v0.8.0's files were on PyPI five seconds *before* the
+            # deploy job started, yet every attempt in the retry loop below
+            # failed against a stale cached index — retrying alone cannot fix
+            # that, because nothing re-fetches the index.
+            # The loop remains for genuine CDN lag, which is seconds-scale.
             for attempt in 1 2 3 4 5; do
-              if "\$UV" tool install --force "$SPEC"; then
+              if "\$UV" tool install --force --refresh-package gtd-tui "$SPEC"; then
                 break
               fi
               if [ "\$attempt" = 5 ]; then
                 echo "$SPEC still not installable after 5 attempts" >&2
                 exit 1
               fi
-              echo "Attempt \$attempt failed; waiting for PyPI to catch up..."
+              echo "Attempt \$attempt failed; retrying..."
               sleep 15
             done
             sudo systemctl restart gtd-api
