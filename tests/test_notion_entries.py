@@ -75,10 +75,36 @@ class TestTodayFilter:
         bounds = [
             c['date']['on_or_before']
             for c in date_clause
-            if 'on_or_before' in c['date']
+            if c['property'] == 'Follow-Up Date'
+            and 'on_or_before' in c['date']
         ]
 
         assert bounds == [datetime.now().strftime('%Y-%m-%d')]
+
+    def test_a_due_date_surfaces_an_item_a_snooze_would_hide(self):
+        """The hard landscape outranks the tickler.
+
+        Snoozing sets a Follow-Up Date, which is a request to be left alone
+        until then. A Due Date is a commitment to someone else. Gating Today
+        on the follow-up alone meant an item due Wednesday but snoozed to
+        Friday vanished on Wednesday, with nothing anywhere to say so.
+        """
+        date_clause = _today_filter()['and'][1]['or']
+        today = datetime.now().strftime('%Y-%m-%d')
+
+        assert {
+            'property': 'Due Date',
+            'date': {'on_or_before': today},
+        } in date_clause
+
+    def test_undated_items_are_not_admitted_by_the_due_clause(self):
+        """`is_empty` on Due Date would drag in every snoozed item."""
+        date_clause = _today_filter()['and'][1]['or']
+        empties = [
+            c['property'] for c in date_clause if c['date'].get('is_empty')
+        ]
+
+        assert empties == ['Follow-Up Date']
 
     def test_status_and_date_clauses_are_anded(self):
         result = _today_filter()

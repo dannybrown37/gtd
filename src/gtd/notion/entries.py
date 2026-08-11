@@ -12,6 +12,7 @@ from dateutil import parser as dateparser
 
 
 __all__ = [
+    'is_due_today',
     'list_entries',
     'select_entry',
     'show_triage',
@@ -57,7 +58,17 @@ def _parse_date_input(raw: str) -> str | None:
 
 
 def _today_filter() -> dict:
-    """Build the Notion filter for today's actionable items."""
+    """Build the Notion filter for today's actionable items.
+
+    An item surfaces when its tickler has come due (Follow-Up Date on or
+    before today, or never set) *or* when it is due today or overdue.
+
+    The Due Date disjunct is what stops a snooze from burying a commitment:
+    a Follow-Up Date is a note to yourself, a Due Date is a promise to
+    someone else, so the deadline has to outrank the deferral. Note the
+    asymmetry — an *unset* Due Date admits nothing, or every snoozed item
+    in the database would come back.
+    """
     today = datetime.now().strftime('%Y-%m-%d')
     active_statuses = ['Current Project', 'Recurring']
     return {
@@ -78,10 +89,27 @@ def _today_filter() -> dict:
                         'property': 'Follow-Up Date',
                         'date': {'is_empty': True},
                     },
+                    {
+                        'property': 'Due Date',
+                        'date': {'on_or_before': today},
+                    },
                 ],
             },
         ],
     }
+
+
+def is_due_today(entry: ProjectEntry, today: str) -> bool:
+    """Should this entry surface today, given its tickler and its deadline?
+
+    The client-side twin of `_today_filter`'s date clause, for the callers
+    that filter in Python after a broader query (the HTTP API's
+    `/next-steps`). Both must agree or the TUI and the webapp disagree about
+    what "today" contains -- keep them in step.
+    """
+    if entry.due_date and entry.due_date <= today:
+        return True
+    return not entry.follow_up_date or entry.follow_up_date <= today
 
 
 def _get_today_entries() -> list[ProjectEntry]:

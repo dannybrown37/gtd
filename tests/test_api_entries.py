@@ -423,3 +423,87 @@ def test_done_still_archives_without_reschedule(
 
 
 # endregion
+
+
+# region /next-steps — the due-date escape hatch
+
+
+TODAY = '2026-08-11'
+
+
+@pytest.fixture
+def fixed_today(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin the server's idea of today so date tests don't drift."""
+    monkeypatch.setattr(
+        api, '_get_timezone_iso_date', MagicMock(return_value=TODAY)
+    )
+
+
+def next_steps_headers(
+    client: FlaskClient,
+    auth_header: dict[str, str],
+) -> list[str]:
+    response = client.get('/next-steps', headers=auth_header)
+    assert response.status_code == 200
+    return [e['header'] for e in response.get_json()]
+
+
+@pytest.mark.usefixtures('fixed_today')
+def test_snoozed_item_stays_hidden(
+    client: FlaskClient,
+    auth_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No due date, deferred to next week — snoozing must still work."""
+    patch_query(
+        monkeypatch,
+        [make_entry(header='Later', follow_up_date='2026-08-20')],
+    )
+
+    assert next_steps_headers(client, auth_header) == []
+
+
+@pytest.mark.parametrize('due', ['2026-08-11', '2026-08-04'])
+@pytest.mark.usefixtures('fixed_today')
+def test_a_due_date_beats_a_future_snooze(
+    client: FlaskClient,
+    auth_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    due: str,
+) -> None:
+    """Due today or overdue surfaces however far ahead the snooze reaches.
+
+    The webapp reimplements the TUI's Today gate client-side, so this is the
+    same bug in a second place: an item due Wednesday and snoozed to Friday
+    disappeared on Wednesday.
+    """
+    patch_query(
+        monkeypatch,
+        [make_entry(header='Owed', due_date=due, follow_up_date='2026-08-20')],
+    )
+
+    assert next_steps_headers(client, auth_header) == ['Owed']
+
+
+@pytest.mark.usefixtures('fixed_today')
+def test_a_future_due_date_does_not_defeat_a_snooze(
+    client: FlaskClient,
+    auth_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only a deadline that has arrived overrides the deferral."""
+    patch_query(
+        monkeypatch,
+        [
+            make_entry(
+                header='Owed later',
+                due_date='2026-09-01',
+                follow_up_date='2026-08-20',
+            )
+        ],
+    )
+
+    assert next_steps_headers(client, auth_header) == []
+
+
+# endregion

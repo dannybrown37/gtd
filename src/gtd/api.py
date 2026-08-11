@@ -37,6 +37,7 @@ from gtd.notion.client import (
     update_page,
     archive_page,
 )
+from gtd.notion.entries import is_due_today
 from gtd.notion.models import ProjectEntry
 from gtd.notion.schema import STATUSES
 from gtd.notion.triage import TRIAGE_STATUSES
@@ -624,11 +625,7 @@ def next_steps() -> Any:
     today_str = _get_timezone_iso_date()
     pages = query_database(filter_obj=_current_project_or_recurring_query())
     entries = [ProjectEntry.from_page(p) for p in pages]
-    entries = [
-        e
-        for e in entries
-        if not e.follow_up_date or e.follow_up_date <= today_str
-    ]
+    entries = [e for e in entries if is_due_today(e, today_str)]
     context = request.args.get('context')
     if context:
         context = unquote_plus(context)
