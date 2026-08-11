@@ -22,6 +22,7 @@ from dateutil import parser as dateparser
 from gtd.notion.capture import _create_page
 from gtd.notion.client import (
     add_area,
+    add_list_category,
     build_property_update,
     get_areas,
     get_contexts,
@@ -29,7 +30,9 @@ from gtd.notion.client import (
     get_page_body,
     query_database,
     remove_area,
+    remove_list_category,
     rename_area,
+    rename_list_category,
     replace_page_body,
     update_page,
     archive_page,
@@ -315,6 +318,13 @@ def _apply_triage_updates(
 # Endpoint definitions should be alphabetical
 
 
+def _pages_with_select(prop: str, value: str) -> list[dict]:
+    """Every page whose `prop` select equals `value`."""
+    return query_database(
+        filter_obj={'property': prop, 'select': {'equals': value}},
+    )
+
+
 def _resolve_area(name: str) -> tuple[str | None, list[str]]:
     """Map `name` to its canonical Area, case-insensitively.
 
@@ -365,6 +375,16 @@ def delete_area(name: str) -> Any:
         canonical, _ = _resolve_area(unquote_plus(name))
         if not canonical:
             return jsonify(error=f'Unknown area "{name}"'), 404
+        # Removing the select option would orphan every entry still on it.
+        occupied = len(_pages_with_select('Area', canonical))
+        if occupied:
+            return jsonify(
+                error=(
+                    f'Area "{canonical}" still has {occupied} item(s). '
+                    f'Move or drop them before removing it.'
+                ),
+                count=occupied,
+            ), 409
         remove_area(canonical)
         return jsonify(areas=sorted(get_areas())), 200
     except Exception:
@@ -666,6 +686,126 @@ def list_categories() -> Any:
             'Failed to fetch list categories for /list-categories'
         )
         return jsonify(error='Could not retrieve list categories'), 500
+
+
+def _resolve_list_category(name: str) -> tuple[str | None, list[str]]:
+    """Map `name` to its canonical List Category, case-insensitively."""
+    available = get_list_categories()
+    return {c.lower(): c for c in available}.get(name.strip().lower()), (
+        available
+    )
+
+
+@app.post('/list-categories')
+@require_auth
+def post_list_category() -> Any:
+    """Create a list category. Body: {"name": "..."}. Mirrors `+`."""
+    body = request.get_json(force=True, silent=True) or {}
+    name = (body.get('name') or '').strip()
+    if not name:
+        return jsonify(error='name is required'), 400
+    try:
+        existing, _ = _resolve_list_category(name)
+        if existing:
+            return jsonify(error=f'Category "{existing}" already exists'), 409
+        add_list_category(name)
+        return jsonify(list_categories=sorted(get_list_categories())), 201
+    except Exception:
+        logger.exception('Failed to add list category %s', name)
+        return jsonify(error='Could not add list category'), 500
+
+
+@app.delete('/list-categories/<name>')
+@require_auth
+def delete_list_category(name: str) -> Any:
+    """Delete an empty list category. Mirrors the TUI's `-`."""
+    try:
+        canonical, _ = _resolve_list_category(unquote_plus(name))
+        if not canonical:
+            return jsonify(error=f'Unknown category "{name}"'), 404
+        # Removing the select option would orphan every item still in it.
+        occupied = len(_pages_with_select('List Category', canonical))
+        if occupied:
+            return jsonify(
+                error=(
+                    f'Category "{canonical}" still has {occupied} item(s). '
+                    f'Move or drop them before removing it.'
+                ),
+                count=occupied,
+            ), 409
+        remove_list_category(canonical)
+        return jsonify(list_categories=sorted(get_list_categories())), 200
+    except Exception:
+        logger.exception('Failed to remove list category %s', name)
+        return jsonify(error='Could not remove list category'), 500
+
+
+@app.patch('/list-categories/<name>')
+@require_auth
+def patch_list_category(name: str) -> Any:
+    """Rename a list category. Body: {"new_name": "..."}. Mirrors `)`."""
+    body = request.get_json(force=True, silent=True) or {}
+    new_name = (body.get('new_name') or '').strip()
+    if not new_name:
+        return jsonify(error='new_name is required'), 400
+    try:
+        canonical, available = _resolve_list_category(unquote_plus(name))
+        if not canonical:
+            return jsonify(error=f'Unknown category "{name}"'), 404
+        collision = {c.lower() for c in available} - {canonical.lower()}
+        if new_name.lower() in collision:
+            return jsonify(error=f'Category "{new_name}" already exists'), 409
+        # Entries keep the old value after the option is renamed, so collect
+        # them first and rewrite each one.
+        pages = _pages_with_select('List Category', canonical)
+        rename_list_category(canonical, new_name)
+        for page in pages:
+            update_page(
+                page['id'], build_property_update(list_category=new_name)
+            )
+        return jsonify(list_categories=sorted(get_list_categories())), 200
+    except Exception:
+        logger.exception('Failed to rename list category %s', name)
+        return jsonify(error='Could not rename list category'), 500
+
+
+@app.post('/list/<category>')
+@require_auth
+def post_list_item(category: str) -> Any:
+    """Add an item to a list category. Body: {"header", "next_step"}."""
+    body = request.get_json(force=True, silent=True) or {}
+    header = (body.get('header') or '').strip()
+    if not header:
+        return jsonify(error='header is required'), 400
+    next_step = (body.get('next_step') or '').strip()
+    try:
+        canonical, available = _resolve_list_category(unquote_plus(category))
+    except Exception:
+        logger.exception('Failed to fetch list categories')
+        return jsonify(error='Could not retrieve list categories'), 500
+    if not canonical:
+        return jsonify(
+            error=(
+                f'Invalid list category "{category}". '
+                f'Valid categories: {", ".join(sorted(available))}'
+            )
+        ), 404
+    try:
+        page = _create_page(header)
+        update_page(
+            page['id'],
+            build_property_update(
+                status='List',
+                list_category=canonical,
+                next_step=next_step or None,
+            ),
+        )
+    except Exception:
+        logger.exception('Failed to add item to list %s', canonical)
+        return jsonify(error='Could not add list item'), 500
+    return jsonify(
+        page_id=page['id'], header=header, list_category=canonical
+    ), 201
 
 
 @app.get('/list/<category>')

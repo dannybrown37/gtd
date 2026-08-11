@@ -62,9 +62,9 @@ TUI_ONLY = {
     'command_palette': 'keyboard navigation',
     'quit': 'no equivalent in a browser tab',
     'dismiss_cel': 'celebration animation is TUI chrome',
-    # Deferred by scope: the Weekly Review and the List-category CRUD are a
-    # follow-up pass, not part of the core-actions parity work. (Area CRUD
-    # was part of that backlog and has since been ported.)
+    # Deferred by scope: the Weekly Review is a follow-up pass, not part of
+    # the core-actions parity work. (Area CRUD and List-category CRUD were
+    # part of that backlog and have since been ported.)
     'complete_habit': 'Weekly Review not yet ported',
     'complete_step': 'Weekly Review not yet ported',
     'finish_step': 'Weekly Review not yet ported',
@@ -73,12 +73,6 @@ TUI_ONLY = {
     'reset': 'Weekly Review not yet ported',
     'someday': 'Weekly Review browse screen; webapp uses move_someday',
     'drop': 'Weekly Review browse screen; webapp uses drop_entry',
-    'add_category': 'List category CRUD not yet ported',
-    'remove_category': 'List category CRUD not yet ported',
-    'rename_category': 'List category CRUD not yet ported',
-    'move_item': 'List category CRUD not yet ported',
-    'add_item': 'List category CRUD not yet ported',
-    'update_item': 'List category CRUD not yet ported',
     'save': 'modal-internal binding',
     'cancel': 'modal-internal binding',
 }

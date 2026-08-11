@@ -120,6 +120,7 @@ Changes are collected (`_to_done: list`, `_status_changes: dict[str, str]`) and 
 `SomedayContent` groups and sorts by **Area** (`ProjectEntry.area`), not Context — Context answers "what tool do I need to act on this," which is meaningless for something explicitly not actionable yet; Area answers "which part of my life is this in," which is what matters when reviewing Someday/Maybe. This mirrors the Lists tab's `List Category` pattern exactly: `Area` is its own Notion select property (`schema.py`), with its own CRUD in `client.py` (`get_areas`/`add_area`/`remove_area`/`rename_area`) and its own `ProjectEntry.area` field — entirely independent of Context.
 
 - `_rebuild_list()` shows every known area (even empty ones, labelled `(empty)`) plus a trailing `(no area)` bucket for unassigned entries — same shape as `ListsContent._rebuild_list`.
+- **An Area is only removable while empty** — `-` refuses (a warning notification, no confirm-anyway escape hatch) if any entry still carries it. Deleting the Notion select option leaves those entries pointing at a value that no longer exists, invisible under every grouping. The same rule applies to List categories and is enforced server-side too (`DELETE /areas/<name>` and `DELETE /list-categories/<name>` both 409 with a `count`).
 - Keys: `(` assign/change an entry's Area (`SelectModal`, `(no area)` to clear), `+`/`-`/`)` add/remove/rename an Area itself (identical mechanics and key choices to Lists' category CRUD). Rename propagates to every entry carrying the old value, same as `action_rename_category`.
 - `L` (→ List) writes the chosen category into the `List Category` property via `build_property_update(list_category=...)` — it used to incorrectly write into `Context`, which polluted the Context select with list-category values.
 
@@ -252,8 +253,7 @@ hand-maintained lists compared to each other would drift together and always pas
 When you add a TUI binding, either implement it in the webapp and add its action name to
 `CAPABILITIES`, or add it to `TUI_ONLY` in the test **with a reason**. `TUI_ONLY` is for
 things that genuinely can't cross (keyboard navigation, `quit`) and for deliberately
-deferred scope — currently the Weekly Review and List-category CRUD, which the TUI has
-and the webapp does not.
+deferred scope — currently the Weekly Review, which the TUI has and the webapp does not.
 
 **Areas of Focus in the webapp** — the Someday view has its own loader (`loadSomeday`,
 `kind: 'someday'`) rather than the generic `/entries` one, because it has to group by
@@ -267,6 +267,14 @@ assignment, which is just `PATCH /entry/<id> {"area": ...}`.
 `PATCH /areas/<name>` renames the Notion select option **and** rewrites every entry
 still carrying the old value, mirroring `action_rename_area`; renaming the option alone
 leaves entries pointing at a value that no longer exists.
+
+**List categories in the webapp** — the Lists view shows one category at a time (chips
+pick it) and renders a `renderListSection` header for it carrying ✎/✕ (rename/remove),
+an `+ Add to <category>` row and a trailing `+ New category` row — the TUI's `)`, `-`,
+`A` and `+`. Backed by `POST/DELETE/PATCH /list-categories` and `POST /list/<category>`
+(which creates the page and stamps Status=List + the category on it). `PATCH
+/list-categories/<name>` rewrites every entry on the old value, exactly as `PATCH
+/areas/<name>` does.
 
 Webapp structure: `VIEWS` in `app.js` maps one entry per TUI tab; a single generic list
 view renders them all, backed by `GET /entries?status=…`. Per-entry actions live in an

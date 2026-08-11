@@ -242,6 +242,10 @@ your own token.
 | `GET` | `/icons/<path:filename>` | Serve the web app's PWA icons. |
 | `GET` | `/inbox` | Get all Triage entries (inbox). |
 | `GET` | `/list-categories` | Return canonical list categories from Notion (for debugging/UI use). |
+| `POST` | `/list-categories` | Create a list category. Body: {"name": "..."}. Mirrors `+`. |
+| `DELETE` | `/list-categories/<name>` | Delete an empty list category. Mirrors the TUI's `-`. |
+| `PATCH` | `/list-categories/<name>` | Rename a list category. Body: {"new_name": "..."}. Mirrors `)`. |
+| `POST` | `/list/<category>` | Add an item to a list category. Body: {"header", "next_step"}. |
 | `GET` | `/list/<category>` | Get all entries in a specific list category. |
 | `GET` | `/manifest.json` | Serve the PWA manifest. |
 | `GET` | `/next-steps` | Get actionable next steps, optionally filtered by context. |

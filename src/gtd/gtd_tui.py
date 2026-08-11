@@ -3177,15 +3177,15 @@ class SomedayContent(BaseEntryContent):
         )
         if not area:
             return
+        # Removing the option would orphan its entries, so refuse outright.
         items = [e for e in self._entries if e.area == area]
         if items:
-            confirmed = await self.app.push_screen_wait(
-                ConfirmModal(
-                    f'"{area}" has {len(items)} item(s). Remove anyway?'
-                )
+            self.app.notify(
+                f'"{area}" still has {len(items)} item(s) — '
+                f'move or drop them first',
+                severity='warning',
             )
-            if not confirmed:
-                return
+            return
         try:
             loop = asyncio.get_running_loop()
             await loop.run_in_executor(None, remove_area, area)
@@ -3622,15 +3622,15 @@ class ListsContent(BaseEntryContent):
         )
         if not cat:
             return
+        # Removing the option would orphan its items, so refuse outright.
         items = [e for e in self._entries if e.list_category == cat]
         if items:
-            confirmed = await self.app.push_screen_wait(
-                ConfirmModal(
-                    f'"{cat}" has {len(items)} item(s). Remove anyway?'
-                )
+            self.app.notify(
+                f'"{cat}" still has {len(items)} item(s) — '
+                f'move or drop them first',
+                severity='warning',
             )
-            if not confirmed:
-                return
+            return
         try:
             loop = asyncio.get_running_loop()
             await loop.run_in_executor(None, remove_list_category, cat)

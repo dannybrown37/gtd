@@ -25,6 +25,12 @@ const CAPABILITIES = [
   'add_area',
   'remove_area',
   'rename_area',
+  'add_item',
+  'update_item',
+  'move_item',
+  'add_category',
+  'remove_category',
+  'rename_category',
 ];
 
 // Chip value standing in for "entries with no Area at all"; the empty string
@@ -67,6 +73,7 @@ const state = {
   currentCategory: '',
   currentArea: '',
   areas: [],
+  categories: [],
   schema: null,
   entries: [],
 };
@@ -324,6 +331,60 @@ function renderAreaSections(entries, areas, { onTap }) {
   list.appendChild(add);
 }
 
+// The Lists tab shows one category at a time (chips pick it), so its header
+// row carries that category's rename/remove affordances — the TUI's `)`/`-` —
+// plus the add-item row (`A`) and a trailing new-category row (`+`).
+function renderListSection(category, entries, { onTap }) {
+  const list = $('#entry-list');
+  list.innerHTML = '';
+
+  const header = document.createElement('li');
+  header.className = 'group-header';
+  header.innerHTML = `
+    <span class="group-label">${escapeHtml(category)}</span>
+    <span class="group-count">${entries.length ? entries.length : '(empty)'}</span>
+    <button class="group-btn" data-act="rename" aria-label="Rename ${escapeHtml(category)}">✎</button>
+    <button class="group-btn" data-act="remove" aria-label="Remove ${escapeHtml(category)}">✕</button>
+  `;
+  header.querySelector('[data-act="rename"]').addEventListener('click', () =>
+    openRenameCategoryModal(category)
+  );
+  header.querySelector('[data-act="remove"]').addEventListener('click', () =>
+    confirmRemoveCategory(category, entries.length)
+  );
+  list.appendChild(header);
+
+  entries.forEach((entry) => list.appendChild(entryRow(entry, onTap)));
+
+  const addItem = document.createElement('li');
+  addItem.className = 'group-add';
+  addItem.innerHTML = `<button class="group-add-btn">+ Add to ${escapeHtml(category)}</button>`;
+  addItem.querySelector('button').addEventListener('click', () =>
+    openAddListItemModal(category)
+  );
+  list.appendChild(addItem);
+
+  const addCategory = document.createElement('li');
+  addCategory.className = 'group-add';
+  addCategory.innerHTML = '<button class="group-add-btn">+ New category</button>';
+  addCategory.querySelector('button').addEventListener('click',
+    openNewCategoryModal
+  );
+  list.appendChild(addCategory);
+}
+
+// With no categories at all there is nothing to render a section for, but the
+// user still needs a way out of that state.
+function renderNewCategoryOnly() {
+  const list = $('#entry-list');
+  list.innerHTML = '';
+  const li = document.createElement('li');
+  li.className = 'group-add';
+  li.innerHTML = '<button class="group-add-btn">+ New category</button>';
+  li.querySelector('button').addEventListener('click', openNewCategoryModal);
+  list.appendChild(li);
+}
+
 function removeEntryRow(pageId) {
   const li = $(`#entry-list [data-page-id="${pageId}"]`);
   if (li) li.remove();
@@ -479,11 +540,15 @@ async function loadLists() {
     reportError(err);
     return;
   }
+  state.categories = categories;
   if (!categories.length) {
     setEmpty('No list categories defined');
+    renderNewCategoryOnly();
     return;
   }
-  if (!state.currentCategory) state.currentCategory = categories[0];
+  if (!categories.includes(state.currentCategory)) {
+    state.currentCategory = categories[0];
+  }
   renderChips(
     categories.map((c) => ({ value: c, label: c })),
     state.currentCategory,
@@ -495,8 +560,10 @@ async function loadLists() {
   try {
     const path = `/list/${encodeURIComponent(state.currentCategory)}`;
     state.entries = await apiFetch(path);
-    renderEntries(state.entries, { onTap: openActionSheet });
-    setEmpty(state.entries.length ? '' : 'Nothing in this list');
+    renderListSection(state.currentCategory, state.entries, {
+      onTap: openActionSheet,
+    });
+    setEmpty('');
   } catch (err) {
     reportError(err);
   }
@@ -793,7 +860,7 @@ async function openAreaPicker(entry) {
   });
 }
 
-async function areaRequest(path, options, successMessage) {
+async function mutateAndReload(path, options, successMessage) {
   try {
     await apiFetch(path, options);
     closeModal();
@@ -818,7 +885,7 @@ function openNewAreaModal() {
   $('#area-save').addEventListener('click', () => {
     const name = $('#area-name').value.trim();
     if (!name) return;
-    areaRequest(
+    mutateAndReload(
       '/areas',
       { method: 'POST', body: JSON.stringify({ name }) },
       `Added area "${name}"`
@@ -840,7 +907,7 @@ function openRenameAreaModal(area) {
   $('#area-save').addEventListener('click', () => {
     const newName = $('#area-name').value.trim();
     if (!newName || newName === area) return closeModal();
-    areaRequest(
+    mutateAndReload(
       `/areas/${encodeURIComponent(area)}`,
       { method: 'PATCH', body: JSON.stringify({ new_name: newName }) },
       `Renamed to "${newName}"`
@@ -848,15 +915,20 @@ function openRenameAreaModal(area) {
   });
 }
 
+// An Area is never removed out from under its entries — the server refuses
+// with a 409 too, this just says so without a round trip.
 function confirmRemoveArea(area, count) {
+  if (count) {
+    showToast(
+      `"${area}" still has ${count} item(s) — move or drop them first`,
+      true
+    );
+    return;
+  }
   openModal(`
     <h2>Remove area?</h2>
     <p class="entry-meta">${escapeHtml(area)}</p>
-    <p class="entry-meta">${
-      count
-        ? `${count} item(s) will lose their area.`
-        : 'It has no items.'
-    }</p>
+    <p class="entry-meta">It has no items.</p>
     <div class="modal-actions">
       <button class="secondary-btn" id="area-cancel">Cancel</button>
       <button class="primary-btn danger-action" id="area-remove">Remove</button>
@@ -864,12 +936,119 @@ function confirmRemoveArea(area, count) {
   `);
   $('#area-cancel').addEventListener('click', closeModal);
   $('#area-remove').addEventListener('click', () =>
-    areaRequest(
+    mutateAndReload(
       `/areas/${encodeURIComponent(area)}`,
       { method: 'DELETE' },
       `Removed area "${area}"`
     )
   );
+}
+
+// endregion
+
+// region List categories
+
+function openNewCategoryModal() {
+  openModal(`
+    <h2>New list category</h2>
+    <input id="cat-name" type="text" placeholder="Category name" />
+    <div class="modal-actions">
+      <button class="secondary-btn" id="cat-cancel">Cancel</button>
+      <button class="primary-btn" id="cat-save">Add</button>
+    </div>
+  `);
+  $('#cat-name').focus();
+  $('#cat-cancel').addEventListener('click', closeModal);
+  $('#cat-save').addEventListener('click', () => {
+    const name = $('#cat-name').value.trim();
+    if (!name) return;
+    state.currentCategory = name;
+    mutateAndReload(
+      '/list-categories',
+      { method: 'POST', body: JSON.stringify({ name }) },
+      `Added category "${name}"`
+    );
+  });
+}
+
+function openRenameCategoryModal(category) {
+  openModal(`
+    <h2>Rename category</h2>
+    <input id="cat-name" type="text" value="${escapeHtml(category)}" />
+    <div class="modal-actions">
+      <button class="secondary-btn" id="cat-cancel">Cancel</button>
+      <button class="primary-btn" id="cat-save">Rename</button>
+    </div>
+  `);
+  $('#cat-name').focus();
+  $('#cat-cancel').addEventListener('click', closeModal);
+  $('#cat-save').addEventListener('click', () => {
+    const newName = $('#cat-name').value.trim();
+    if (!newName || newName === category) return closeModal();
+    state.currentCategory = newName;
+    mutateAndReload(
+      `/list-categories/${encodeURIComponent(category)}`,
+      { method: 'PATCH', body: JSON.stringify({ new_name: newName }) },
+      `Renamed to "${newName}"`
+    );
+  });
+}
+
+// Same rule as Areas: a category with items in it can't be removed, or the
+// items are left pointing at a select option that no longer exists.
+function confirmRemoveCategory(category, count) {
+  if (count) {
+    showToast(
+      `"${category}" still has ${count} item(s) — move or drop them first`,
+      true
+    );
+    return;
+  }
+  openModal(`
+    <h2>Remove category?</h2>
+    <p class="entry-meta">${escapeHtml(category)}</p>
+    <p class="entry-meta">It has no items.</p>
+    <div class="modal-actions">
+      <button class="secondary-btn" id="cat-cancel">Cancel</button>
+      <button class="primary-btn danger-action" id="cat-remove">Remove</button>
+    </div>
+  `);
+  $('#cat-cancel').addEventListener('click', closeModal);
+  $('#cat-remove').addEventListener('click', () => {
+    state.currentCategory = '';
+    mutateAndReload(
+      `/list-categories/${encodeURIComponent(category)}`,
+      { method: 'DELETE' },
+      `Removed category "${category}"`
+    );
+  });
+}
+
+function openAddListItemModal(category) {
+  openModal(`
+    <h2>Add to ${escapeHtml(category)}</h2>
+    <input id="item-name" type="text" placeholder="Item" />
+    <input id="item-extra" type="text" placeholder="Extra info (optional)" />
+    <div class="modal-actions">
+      <button class="secondary-btn" id="item-cancel">Cancel</button>
+      <button class="primary-btn" id="item-save">Add</button>
+    </div>
+  `);
+  $('#item-name').focus();
+  $('#item-cancel').addEventListener('click', closeModal);
+  $('#item-save').addEventListener('click', () => {
+    const header = $('#item-name').value.trim();
+    if (!header) return;
+    const nextStep = $('#item-extra').value.trim();
+    mutateAndReload(
+      `/list/${encodeURIComponent(category)}`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ header, next_step: nextStep }),
+      },
+      `Added "${header}"`
+    );
+  });
 }
 
 // endregion

@@ -119,9 +119,28 @@ def test_delete_area_removes_it(
 ) -> None:
     remove = MagicMock()
     monkeypatch.setattr(api, 'remove_area', remove)
+    monkeypatch.setattr(api, 'query_database', MagicMock(return_value=[]))
     response = client.delete('/areas/work', headers=auth_header)
     assert response.status_code == 200
     remove.assert_called_once_with('Work')
+
+
+@pytest.mark.usefixtures('areas')
+def test_delete_area_refuses_while_it_still_has_entries(
+    client: FlaskClient,
+    auth_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Removing the option would orphan them, so the delete is refused."""
+    remove = MagicMock()
+    monkeypatch.setattr(api, 'remove_area', remove)
+    monkeypatch.setattr(
+        api, 'query_database', MagicMock(return_value=[{'id': 'p1'}])
+    )
+    response = client.delete('/areas/work', headers=auth_header)
+    assert response.status_code == 409
+    assert response.get_json()['count'] == 1
+    remove.assert_not_called()
 
 
 @pytest.mark.usefixtures('areas')

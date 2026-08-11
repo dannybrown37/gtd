@@ -1524,3 +1524,32 @@ class TestSomedayIsNotStuckInTheInbox:
         simple = [c for c in inbox_filter()['or'] if 'property' in c]
         assert {'property': 'Status', 'select': {'equals': 'Triage'}} in simple
         assert {'property': 'Status', 'select': {'is_empty': True}} in simple
+
+
+class TestGroupsAreNotRemovedWhileOccupied:
+    """A select option with entries on it can't be deleted from the TUI.
+
+    Removing the Notion select option leaves every entry carrying a value
+    that no longer exists — orphaned, and invisible under any grouping. The
+    remove actions used to offer a "Remove anyway?" confirmation; they now
+    refuse and tell the user to empty the group first.
+    """
+
+    @pytest.mark.parametrize(
+        ('widget', 'action', 'field'),
+        [
+            (SomedayContent, 'action_remove_area', 'area'),
+            (ListsContent, 'action_remove_category', 'list_category'),
+        ],
+    )
+    def test_the_action_refuses_instead_of_confirming(
+        self, widget, action, field
+    ):
+        import inspect
+
+        source = inspect.getsource(getattr(widget, action))
+        occupancy = f'if e.{field} == '
+        assert occupancy in source
+        guard = source.split(occupancy)[1]
+        assert 'ConfirmModal' not in guard
+        assert 'move or drop them first' in guard
