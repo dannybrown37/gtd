@@ -296,6 +296,23 @@ function loadActiveView() {
   return loadEntries(view);
 }
 
+// The TUI can reload the current tab from anywhere; without this the only way
+// to re-fetch was to navigate away and back.
+async function refreshActiveView() {
+  const btn = $('#refresh-btn');
+  if (btn.disabled) return;
+  btn.disabled = true;
+  btn.classList.add('spinning');
+  try {
+    await loadActiveView();
+  } finally {
+    btn.classList.remove('spinning');
+    btn.disabled = false;
+  }
+}
+
+$('#refresh-btn').addEventListener('click', refreshActiveView);
+
 async function loadNextSteps() {
   try {
     const { contexts } = await apiFetch('/contexts');
