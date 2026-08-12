@@ -7,6 +7,10 @@ from http import HTTPStatus
 import httpx
 
 from gtd.notion.config import get_config_value
+from gtd.notion.schema import (
+    WAITING_FOR_STATUS,
+    default_waiting_for_follow_up,
+)
 
 
 __all__ = [
@@ -554,6 +558,18 @@ def build_property_update(  # noqa: C901, PLR0912
             props['Follow-Up Date'] = {'date': None}
         else:
             props['Follow-Up Date'] = {'date': {'start': follow_up_date}}
+    # A Waiting For with no tickler never comes back -- Next Steps reaches
+    # that status *only* through its Follow-Up Date, so an unset one makes
+    # the item invisible until you go looking at the tab. Defaulting here,
+    # at the one point every write passes through, is what makes that
+    # unreachable rather than merely discouraged in six separate prompts.
+    # Keyed off the Status *write*, not the page's status, so an unrelated
+    # edit to an item already waiting can't reset its clock.
+    tickler = props.get('Follow-Up Date', {}).get('date')
+    if status == WAITING_FOR_STATUS and not tickler:
+        props['Follow-Up Date'] = {
+            'date': {'start': default_waiting_for_follow_up()},
+        }
     return props
 
 

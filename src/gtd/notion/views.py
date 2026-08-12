@@ -36,7 +36,7 @@ from datetime import datetime
 
 from gtd.notion.client import query_database
 from gtd.notion.models import ProjectEntry
-from gtd.notion.schema import is_agenda_entry
+from gtd.notion.schema import WAITING_FOR_STATUS, is_agenda_entry
 
 
 __all__ = [
@@ -48,6 +48,7 @@ __all__ = [
     'is_actionable',
     'is_deferred',
     'is_due_today',
+    'needs_follow_up_date',
     'next_steps_entries',
     'searchable_entries',
     'status_filter',
@@ -76,23 +77,49 @@ def _today_filter(today: str) -> dict:
     in the database would come back.
     """
     return {
-        'and': [
-            _status_clause(NEXT_STEP_STATUSES),
+        'or': [
             {
-                'or': [
+                'and': [
+                    _status_clause(NEXT_STEP_STATUSES),
                     {
-                        'property': 'Follow-Up Date',
-                        'date': {'on_or_before': today},
-                    },
-                    {
-                        'property': 'Follow-Up Date',
-                        'date': {'is_empty': True},
-                    },
-                    {
-                        'property': 'Due Date',
-                        'date': {'on_or_before': today},
+                        'or': [
+                            {
+                                'property': 'Follow-Up Date',
+                                'date': {'on_or_before': today},
+                            },
+                            {
+                                'property': 'Follow-Up Date',
+                                'date': {'is_empty': True},
+                            },
+                            {
+                                'property': 'Due Date',
+                                'date': {'on_or_before': today},
+                            },
+                        ],
                     },
                 ],
+            },
+            _waiting_for_due_clause(today),
+        ],
+    }
+
+
+def _waiting_for_due_clause(today: str) -> dict:
+    """A delegated item on the day you said you'd chase it.
+
+    Waiting For is otherwise deliberately absent from Next Steps -- a list
+    of things other people owe you is a weekly-review artifact, not a daily
+    action list. But "chase Sam about the budget" *is* an action, and the
+    day its Follow-Up Date comes due is the day to take it. Note the
+    asymmetry with the clause above: an *unset* Follow-Up Date admits
+    nothing here, or the entire Waiting For list would move in permanently.
+    """
+    return {
+        'and': [
+            _status_clause(WAITING_FOR_STATUS),
+            {
+                'property': 'Follow-Up Date',
+                'date': {'on_or_before': today},
             },
         ],
     }
@@ -106,6 +133,8 @@ def is_due_today(entry: ProjectEntry, today: str) -> bool:
     Notion double, and what lets `next_steps_entries` stay correct even if
     the server-side filter is ever loosened.
     """
+    if entry.status == WAITING_FOR_STATUS:
+        return bool(entry.follow_up_date and entry.follow_up_date <= today)
     if entry.due_date and entry.due_date <= today:
         return True
     return not entry.follow_up_date or entry.follow_up_date <= today
@@ -184,8 +213,29 @@ def inbox_filter() -> dict:
                     },
                 ],
             },
+            {
+                'and': [
+                    _status_clause(WAITING_FOR_STATUS),
+                    {
+                        'property': 'Follow-Up Date',
+                        'date': {'is_empty': True},
+                    },
+                ],
+            },
         ],
     }
+
+
+def needs_follow_up_date(entry: ProjectEntry) -> bool:
+    """A delegated item with no tickler -- reachable only by looking for it.
+
+    `build_property_update` stamps a default, so nothing can create one of
+    these any more. Items that predate that are still in the database, and
+    no other view would ever surface them: Next Steps admits Waiting For
+    only through a Follow-Up Date that has come due, so one with no date at
+    all sits on the Waiting For tab forever, silently.
+    """
+    return entry.status == WAITING_FOR_STATUS and not entry.follow_up_date
 
 
 def drop_triaged_agenda_items(
@@ -202,7 +252,8 @@ def drop_triaged_agenda_items(
     return [
         e
         for e in entries
-        if not (is_agenda_entry(e) and e.status and e.status != 'Triage')
+        if needs_follow_up_date(e)
+        or not (is_agenda_entry(e) and e.status and e.status != 'Triage')
     ]
 
 

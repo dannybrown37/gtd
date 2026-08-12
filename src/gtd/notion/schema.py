@@ -1,5 +1,8 @@
 """GTD Notion database schema definition — single source of truth."""
 
+from datetime import date, timedelta
+
+
 STATUSES = [
     'Triage',
     'Current Project',
@@ -54,6 +57,24 @@ DB_SCHEMA: dict = {
         'date': {},
     },
 }
+
+
+WAITING_FOR_STATUS = 'Waiting For'
+
+# Delegating something and then never hearing about it again is the failure
+# Waiting For exists to prevent, so the tickler is not optional here the way
+# it is on every other status. Six surfaces could produce a Waiting For with
+# no Follow-Up Date and all six called the date "required" without enforcing
+# it, so the default is applied at the single write chokepoint
+# (`build_property_update`) rather than validated six times over.
+WAITING_FOR_DEFAULT_FOLLOW_UP_DAYS = 7
+
+
+def default_waiting_for_follow_up(today: date | None = None) -> str:
+    """The Follow-Up Date a Waiting For gets when none is given."""
+    base = today or date.today()
+    due = base + timedelta(days=WAITING_FOR_DEFAULT_FOLLOW_UP_DAYS)
+    return due.isoformat()
 
 
 AGENDA_CONTEXT_PREFIX = '@'

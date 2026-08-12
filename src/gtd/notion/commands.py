@@ -13,6 +13,10 @@ from gtd.notion.entries import (
     show_triage,
 )
 from gtd.notion.log import _confirm_delete
+from gtd.notion.schema import (
+    WAITING_FOR_STATUS,
+    default_waiting_for_follow_up,
+)
 from gtd.notion.triage import process_triage
 from gtd.notion.views import entries_for_status
 from gtd.ui import CancelAction, prompt_input
@@ -84,12 +88,15 @@ def set_waiting_for() -> None:
     if waiting_on is None:
         return
 
+    default_follow_up = default_waiting_for_follow_up()
     followup = prompt_input(
-        'Follow-up date (e.g. Friday, in 3 days): ',
+        f'Follow-up date (blank for {default_follow_up}): ',
     )
-    follow_up_date = _parse_date_input(followup) if followup else None
+    follow_up_date = (
+        _parse_date_input(followup) if followup else default_follow_up
+    )
 
-    kwargs: dict = {'status': 'Waiting For'}
+    kwargs: dict = {'status': WAITING_FOR_STATUS}
     if waiting_on:
         kwargs['next_step'] = waiting_on
     if follow_up_date:

@@ -1186,6 +1186,14 @@ async function openTriageModal(entry) {
   renderTriageModal(schema);
 }
 
+const WAITING_FOR_DEFAULT_FOLLOW_UP_DAYS = 7;
+
+function defaultWaitingFollowUp() {
+  const d = new Date();
+  d.setDate(d.getDate() + WAITING_FOR_DEFAULT_FOLLOW_UP_DAYS);
+  return d.toISOString().slice(0, 10);
+}
+
 function optionGrid(name, options, selected) {
   return `<div class="option-grid" data-field="${name}">${options
     .map(
@@ -1201,6 +1209,11 @@ function renderTriageModal(schema) {
   const isList = t.status === 'List';
   const showContext = t.status && !isDelete && !isList;
   const showRest = t.status && !isDelete;
+  const isWaiting = t.status === 'Waiting For';
+  // A Waiting For with no tickler never comes back into Next Steps. The
+  // server defaults it anyway (build_property_update), so pre-fill the same
+  // date here rather than let the user save a blank they can't see the cost of.
+  if (isWaiting && !t.follow_up_date) t.follow_up_date = defaultWaitingFollowUp();
 
   openModal(`
     <h2>${escapeHtml(t.entry.header)}</h2>
@@ -1232,7 +1245,7 @@ function renderTriageModal(schema) {
         <input id="triage-due" type="date" value="${t.due_date}" />
       </div>
       <div>
-        <label>Follow-up Date (optional)</label>
+        <label>Follow-up Date ${isWaiting ? '(required)' : '(optional)'}</label>
         <input id="triage-followup" type="date" value="${t.follow_up_date}" />
       </div>` : ''}
     ${isDelete ? '<p class="entry-meta">This will permanently delete the entry.</p>' : ''}

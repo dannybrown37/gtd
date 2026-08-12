@@ -19,7 +19,9 @@ from gtd.notion.models import ProjectEntry
 from gtd.notion.schema import STATUSES as ALL_STATUSES
 from gtd.notion.schema import (
     AGENDA_STATUS,
+    WAITING_FOR_STATUS,
     agenda_person_from_header,
+    default_waiting_for_follow_up,
     is_agenda_context,
 )
 from gtd.notion.views import inbox_entries
@@ -164,9 +166,10 @@ def _process_single_entry(entry: ProjectEntry) -> bool:  # noqa: C901, PLR0911, 
             print(f'  Could not parse "{due_date_input}", skipping due date.')
 
     # Follow-Up Date (required for Waiting For)
-    if status == 'Waiting For':
+    if status == WAITING_FOR_STATUS:
+        default = default_waiting_for_follow_up()
         follow_up_input = prompt_input(
-            'Follow-up date (e.g. Friday, in 3 days): ',
+            f'Follow-up date (blank for {default}): ',
         )
     else:
         follow_up_input = prompt_input(
@@ -182,11 +185,9 @@ def _process_single_entry(entry: ProjectEntry) -> bool:  # noqa: C901, PLR0911, 
                 f'  Could not parse "{follow_up_input}", '
                 f'skipping follow-up date.',
             )
-    elif status == 'Waiting For':
-        print(
-            "  ⚠ No follow-up date set — item won't "
-            'appear in Today until one is added.'
-        )
+    elif status == WAITING_FOR_STATUS:
+        follow_up_iso = default_waiting_for_follow_up()
+        print(f'  Follow-up date defaulted to {follow_up_iso}.')
 
     # Build and send update
     props = build_property_update(

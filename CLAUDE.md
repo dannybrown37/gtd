@@ -149,6 +149,22 @@ Skipping the Status prompt also removed the inline *Delete* option for agenda it
 
 `BaseEntryContent._fetch()` is the hook for a tab whose view isn't a plain status query. It must return the result of a `notion/views.py` function, never a query the tab composes itself.
 
+### Waiting For always carries a tickler
+
+A Waiting For with no Follow-Up Date is invisible: Next Steps reaches that status **only** through a due Follow-Up Date, so an unset one leaves the item sitting on its own tab until you go looking. Six surfaces could create that state (TUI `action_waiting_for`, TUI `_triage_one`, `notion/triage.py`, `commands.set_waiting_for`, the webapp triage modal, and a bare `PATCH /entry {status: "Waiting For"}`) and every one of them *called* the date required without enforcing it.
+
+The fix is a **default at the single write chokepoint, not validation at six call sites** — that spread is exactly how the `/inbox` divergence above happened:
+
+- `build_property_update()` (`client.py`): writing `status == 'Waiting For'` with no Follow-Up Date in the same call stamps `default_waiting_for_follow_up()` (today + `WAITING_FOR_DEFAULT_FOLLOW_UP_DAYS`, 1 week). Both live in `schema.py` — `client.py` imports it and it imports nothing, so there's no cycle.
+- Keyed off the **Status write**, not the page's current status, so an unrelated edit to an item already waiting can't reset its clock.
+- This deliberately **outranks the empty-string-clears convention**: `follow_up_date=''` alongside `status='Waiting For'` falls back to the default rather than blinding the item.
+- The prompts stay non-blocking but pre-fill that same date so it's visible and overridable. The webapp duplicates the constant in `app.js`; `test_webapp_parity.py` pins the two numbers together, since divergence would show one date and save another.
+
+Two view consequences, both in `views.py`:
+
+- `_today_filter` is now an **`or` of two branches** — `(Current Project | Recurring) AND any date signal` (including *no* date), plus `_waiting_for_due_clause()`: `Waiting For AND Follow-Up Date on_or_before today`. Note the asymmetry — an *unset* Follow-Up Date admits nothing in the second branch, or the whole Waiting For list would move into Next Steps permanently. `is_due_today` mirrors it with a leading `WAITING_FOR_STATUS` branch.
+- Items predating the default are rescued by `needs_follow_up_date()`, surfaced via `inbox_filter()` the same way a Current Project with no next action is. `drop_triaged_agenda_items()` exempts them, or an agenda-shaped Waiting For would be dropped straight back out.
+
 ### Waiting For tab (Weekly Review)
 
 `WaitingForBrowseScreen` — browse Waiting For items during the Weekly Review step. Actions:

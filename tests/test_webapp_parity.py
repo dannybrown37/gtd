@@ -28,6 +28,7 @@ from pathlib import Path
 import pytest
 
 from gtd import gtd_tui
+from gtd.notion.schema import WAITING_FOR_DEFAULT_FOLLOW_UP_DAYS
 
 APP_JS = Path(__file__).parent.parent / 'src' / 'gtd' / 'webapp' / 'app.js'
 
@@ -135,3 +136,18 @@ def test_tui_only_entries_carry_a_reason() -> None:
 def test_core_actions_are_declared(capability: str) -> None:
     """The actions the parity work existed to deliver, pinned explicitly."""
     assert capability in declared_capabilities()
+
+
+def test_waiting_for_default_matches_the_python_one() -> None:
+    """The webapp pre-fills a date the server would have stamped anyway.
+
+    Two different numbers would show the user one date and save another --
+    silently, since the server default only applies to a blank field.
+    """
+    match = re.search(
+        r'WAITING_FOR_DEFAULT_FOLLOW_UP_DAYS\s*=\s*(\d+)',
+        APP_JS.read_text(),
+    )
+
+    assert match, 'app.js must declare WAITING_FOR_DEFAULT_FOLLOW_UP_DAYS'
+    assert int(match.group(1)) == WAITING_FOR_DEFAULT_FOLLOW_UP_DAYS

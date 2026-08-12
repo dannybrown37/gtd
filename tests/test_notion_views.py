@@ -24,6 +24,7 @@ from gtd.notion.views import (
     inbox_filter,
     is_actionable,
     is_due_today,
+    needs_follow_up_date,
     next_steps_entries,
     status_filter,
 )
@@ -150,9 +151,14 @@ class TestIsActionable:
 # --- _today_filter: what Next Steps asks Notion for ---
 
 
+def _active_branch(today: str = TODAY) -> dict:
+    """The Current Project / Recurring half of `_today_filter`."""
+    return _today_filter(today)['or'][0]
+
+
 class TestTodayFilter:
     def test_matches_only_active_statuses(self):
-        status_clause = _today_filter(TODAY)['and'][0]['or']
+        status_clause = _active_branch()['and'][0]['or']
         statuses = [c['select']['equals'] for c in status_clause]
 
         assert statuses == ['Current Project', 'Recurring']
@@ -162,14 +168,19 @@ class TestTodayFilter:
         ['Triage', 'Waiting For', 'Someday/Maybe', 'List'],
     )
     def test_inactive_statuses_are_not_requested(self, excluded: str):
-        """Someday and Waiting For must never leak into Next Steps."""
-        status_clause = _today_filter(TODAY)['and'][0]['or']
+        """Someday must never leak into Next Steps.
+
+        Waiting For is excluded from *this* branch too -- it reaches Next
+        Steps only through the separate due-tickler clause below, never on
+        status alone.
+        """
+        status_clause = _active_branch()['and'][0]['or']
         statuses = [c['select']['equals'] for c in status_clause]
 
         assert excluded not in statuses
 
     def test_follow_up_clause_admits_due_and_unset_dates(self):
-        date_clause = _today_filter(TODAY)['and'][1]['or']
+        date_clause = _active_branch()['and'][1]['or']
 
         assert {
             'property': 'Follow-Up Date',
@@ -182,7 +193,7 @@ class TestTodayFilter:
 
     def test_future_follow_ups_are_excluded_by_on_or_before(self):
         """Snoozed items stay hidden — the whole point of snoozing."""
-        date_clause = _today_filter(TODAY)['and'][1]['or']
+        date_clause = _active_branch()['and'][1]['or']
         bounds = [
             c['date']['on_or_before']
             for c in date_clause
@@ -193,7 +204,7 @@ class TestTodayFilter:
         assert bounds == [TODAY]
 
     def test_a_due_date_surfaces_an_item_a_snooze_would_hide(self):
-        date_clause = _today_filter(TODAY)['and'][1]['or']
+        date_clause = _active_branch()['and'][1]['or']
 
         assert {
             'property': 'Due Date',
@@ -202,7 +213,7 @@ class TestTodayFilter:
 
     def test_undated_items_are_not_admitted_by_the_due_clause(self):
         """`is_empty` on Due Date would drag in every snoozed item."""
-        date_clause = _today_filter(TODAY)['and'][1]['or']
+        date_clause = _active_branch()['and'][1]['or']
         empties = [
             c['property'] for c in date_clause if c['date'].get('is_empty')
         ]
@@ -210,11 +221,90 @@ class TestTodayFilter:
         assert empties == ['Follow-Up Date']
 
     def test_status_and_date_clauses_are_anded(self):
+        branch = _active_branch()
+
+        assert set(branch) == {'and'}
+        assert len(branch['and']) == 2
+        assert all('or' in clause for clause in branch['and'])
+
+    def test_the_two_branches_are_ored(self):
+        """Two disjoint populations, not one narrowed one.
+
+        Active items are admitted by *any* date signal (including none at
+        all); Waiting For only by a tickler that has come due. Anding these
+        together would admit neither.
+        """
         result = _today_filter(TODAY)
 
-        assert set(result) == {'and'}
-        assert len(result['and']) == 2
-        assert all('or' in clause for clause in result['and'])
+        assert set(result) == {'or'}
+        assert len(result['or']) == 2
+
+
+class TestWaitingForDueClause:
+    """A delegated item on the day you said you'd chase it.
+
+    Waiting For is deliberately absent from Next Steps on status alone -- a
+    list of what other people owe you is a weekly-review artifact. But the
+    day its Follow-Up Date comes due, chasing it *is* today's action, and
+    before this it surfaced nowhere.
+    """
+
+    def test_the_second_branch_is_waiting_for(self):
+        branch = _today_filter(TODAY)['or'][1]
+
+        assert branch['and'][0] == _status_clause('Waiting For')
+
+    def test_only_a_due_tickler_admits_it(self):
+        branch = _today_filter(TODAY)['or'][1]
+
+        assert branch['and'][1] == {
+            'property': 'Follow-Up Date',
+            'date': {'on_or_before': TODAY},
+        }
+
+    def test_an_unset_tickler_admits_nothing(self):
+        """Otherwise the whole Waiting For list moves in permanently."""
+        branch = _today_filter(TODAY)['or'][1]
+        date_clauses = [c for c in branch['and'][1:] if 'date' in c]
+
+        assert not any(c['date'].get('is_empty') for c in date_clauses)
+
+    @pytest.mark.parametrize(
+        ('label', 'entry', 'expected'),
+        [
+            (
+                'tickler came due',
+                _entry(status='Waiting For', follow_up_date=YESTERDAY),
+                True,
+            ),
+            (
+                'tickler is today',
+                _entry(status='Waiting For', follow_up_date=TODAY),
+                True,
+            ),
+            (
+                'tickler is future',
+                _entry(status='Waiting For', follow_up_date=TOMORROW),
+                False,
+            ),
+            (
+                'no tickler at all',
+                _entry(status='Waiting For', follow_up_date=''),
+                False,
+            ),
+            (
+                'due date does not substitute for a tickler',
+                _entry(
+                    status='Waiting For',
+                    follow_up_date='',
+                    due_date=YESTERDAY,
+                ),
+                False,
+            ),
+        ],
+    )
+    def test_is_due_today(self, label: str, entry, expected: bool):
+        assert is_due_today(entry, TODAY) is expected
 
 
 # --- next_steps_entries ---
@@ -256,14 +346,16 @@ class TestNextStepsEntries:
 
         _, query = _run(next_steps_entries, [])
 
-        date_clause = query.call_args.kwargs['filter_obj']['and'][1]['or']
+        filter_obj = query.call_args.kwargs['filter_obj']
+        date_clause = filter_obj['or'][0]['and'][1]['or']
         assert date_clause[0]['date']['on_or_before'] == today
 
     def test_the_caller_may_pin_today(self):
         """The API supplies a timezone-aware date; the TUI does not."""
         _, query = _run(lambda: next_steps_entries('2030-01-01'), [])
 
-        date_clause = query.call_args.kwargs['filter_obj']['and'][1]['or']
+        filter_obj = query.call_args.kwargs['filter_obj']
+        date_clause = filter_obj['or'][0]['and'][1]['or']
         assert date_clause[0]['date']['on_or_before'] == '2030-01-01'
 
 
@@ -277,7 +369,11 @@ def matches_notion_filter(filter_obj: dict, props: dict[str, str]) -> bool:
     if 'or' in filter_obj:
         return any(matches_notion_filter(f, props) for f in filter_obj['or'])
     value = props.get(filter_obj['property'], '')
-    condition = filter_obj.get('select') or filter_obj['rich_text']
+    condition = (
+        filter_obj.get('select')
+        or filter_obj.get('rich_text')
+        or filter_obj['date']
+    )
     if 'is_empty' in condition:
         return not value
     if 'equals' in condition:
@@ -292,6 +388,7 @@ def _props(
     next_step: str = 'Do it',
     success_condition: str = 'Done',
     list_category: str = '',
+    follow_up_date: str = '',
 ) -> dict[str, str]:
     return {
         'Status': status,
@@ -299,6 +396,7 @@ def _props(
         'Next Actionable Step': next_step,
         'Success Condition': success_condition,
         'List Category': list_category,
+        'Follow-Up Date': follow_up_date,
     }
 
 
@@ -327,6 +425,16 @@ class TestInboxFilter:
                 _props(status='Someday/Maybe', context='', next_step=''),
                 False,
             ),
+            (
+                'waiting for with no follow-up date',
+                _props(status='Waiting For', follow_up_date=''),
+                True,
+            ),
+            (
+                'waiting for with a follow-up date',
+                _props(status='Waiting For', follow_up_date='2026-09-01'),
+                False,
+            ),
         ],
     )
     def test_membership(
@@ -335,6 +443,60 @@ class TestInboxFilter:
         assert matches_notion_filter(inbox_filter(), props) is expected, (
             description
         )
+
+
+class TestNeedsFollowUpDate:
+    """A Waiting For with no tickler can only be found by looking for it.
+
+    `build_property_update` now stamps a default, so nothing can create one
+    -- but items predating that are already in the database, and nothing
+    else would ever surface them.
+    """
+
+    @pytest.mark.parametrize(
+        ('description', 'entry', 'expected'),
+        [
+            (
+                'waiting for, no follow-up',
+                _entry(status='Waiting For', follow_up_date=None),
+                True,
+            ),
+            (
+                'waiting for, follow-up set',
+                _entry(status='Waiting For', follow_up_date=TOMORROW),
+                False,
+            ),
+            (
+                'waiting for, follow-up already passed',
+                _entry(status='Waiting For', follow_up_date=YESTERDAY),
+                False,
+            ),
+            (
+                'current project, no follow-up',
+                _entry(status='Current Project', follow_up_date=None),
+                False,
+            ),
+            (
+                'someday, no follow-up',
+                _entry(status='Someday/Maybe', follow_up_date=None),
+                False,
+            ),
+        ],
+    )
+    def test_membership(
+        self, description: str, entry: ProjectEntry, expected: bool
+    ):
+        assert needs_follow_up_date(entry) is expected, description
+
+    def test_an_agenda_shaped_one_is_not_dropped(self):
+        """`drop_triaged_agenda_items` would otherwise undo the rescue."""
+        entry = _entry(
+            header='@Sam: the budget',
+            status='Waiting For',
+            follow_up_date=None,
+        )
+
+        assert drop_triaged_agenda_items([entry]) == [entry]
 
 
 class TestInboxEntries:

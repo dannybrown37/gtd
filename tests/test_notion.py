@@ -1,6 +1,6 @@
 """Tests for Notion integration modules."""
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from http import HTTPStatus
 from unittest.mock import MagicMock, patch
 
@@ -19,6 +19,11 @@ from gtd.notion.log import (
     _is_recurring,
 )
 from gtd.notion.models import ProjectEntry
+from gtd.notion.schema import (
+    WAITING_FOR_DEFAULT_FOLLOW_UP_DAYS,
+    WAITING_FOR_STATUS,
+    default_waiting_for_follow_up,
+)
 from gtd.notion.views import (
     inbox_entries,
     inbox_filter,
@@ -347,7 +352,7 @@ class TestBuildPropertyUpdate:
         assert props['Follow-Up Date'] == {'date': None}
 
     def test_none_omits_field_entirely(self):
-        props = build_property_update(status='Waiting For')
+        props = build_property_update(status='Current Project')
         assert 'Status' in props
         assert 'Due Date' not in props
         assert 'Follow-Up Date' not in props
@@ -363,6 +368,71 @@ class TestBuildPropertyUpdate:
     def test_success_condition_none_omits_field(self):
         props = build_property_update(next_step='Do it')
         assert 'Success Condition' not in props
+
+
+# --- build_property_update: the Waiting For follow-up invariant ---
+
+
+class TestWaitingForAlwaysGetsAFollowUpDate:
+    """A Waiting For with no Follow-Up Date never returns to Next Steps.
+
+    `is_due_today` admits an *unset* Follow-Up Date, but `_today_filter`
+    only queries Current Project and Recurring, so a Waiting For item is
+    reachable solely through its tickler. Without one it is invisible until
+    you go looking at the tab -- which is the whole failure mode Waiting For
+    exists to prevent. Six surfaces could produce that state and every one
+    of them called the date "required" without enforcing it, so the default
+    lives at the single write chokepoint instead.
+    """
+
+    def test_stamps_default_when_none_supplied(self):
+        props = build_property_update(status=WAITING_FOR_STATUS)
+        assert props['Follow-Up Date'] == {
+            'date': {'start': default_waiting_for_follow_up()},
+        }
+
+    def test_default_is_a_week_out(self):
+        expected = date.today() + timedelta(
+            days=WAITING_FOR_DEFAULT_FOLLOW_UP_DAYS,
+        )
+        assert default_waiting_for_follow_up() == expected.isoformat()
+
+    def test_explicit_date_wins_over_the_default(self):
+        props = build_property_update(
+            status=WAITING_FOR_STATUS,
+            follow_up_date='2026-09-01',
+        )
+        assert props['Follow-Up Date'] == {'date': {'start': '2026-09-01'}}
+
+    def test_clearing_the_date_falls_back_to_the_default(self):
+        """`follow_up_date=''` must not be able to blind a Waiting For.
+
+        Empty-string-clears is the convention everywhere else, but on this
+        status it produces exactly the invisible item the default exists to
+        prevent, so the invariant outranks the convention.
+        """
+        props = build_property_update(
+            status=WAITING_FOR_STATUS,
+            follow_up_date='',
+        )
+        assert props['Follow-Up Date'] == {
+            'date': {'start': default_waiting_for_follow_up()},
+        }
+
+    def test_other_statuses_are_untouched(self):
+        for status in ('Current Project', 'Someday/Maybe', 'List'):
+            props = build_property_update(status=status)
+            assert 'Follow-Up Date' not in props
+
+    def test_a_write_that_does_not_set_status_is_untouched(self):
+        """Editing a Waiting For item's notes must not re-stamp its clock.
+
+        The chokepoint is stateless -- it sees the properties being written,
+        not the page. Keying off the Status *write* rather than the page's
+        status is what keeps an unrelated update from resetting the tickler.
+        """
+        props = build_property_update(next_step='Chase Sam again')
+        assert 'Follow-Up Date' not in props
 
 
 # --- ProjectEntry.from_page: parses success_condition ---
@@ -434,7 +504,11 @@ def matches_notion_filter(filter_obj: dict, props: dict[str, str]) -> bool:
     if 'or' in filter_obj:
         return any(matches_notion_filter(f, props) for f in filter_obj['or'])
     value = props.get(filter_obj['property'], '')
-    condition = filter_obj.get('select') or filter_obj['rich_text']
+    condition = (
+        filter_obj.get('select')
+        or filter_obj.get('rich_text')
+        or filter_obj['date']
+    )
     if 'is_empty' in condition:
         return not value
     if 'equals' in condition:
@@ -449,6 +523,7 @@ def _props(
     next_step: str = 'Do it',
     success_condition: str = 'Done',
     list_category: str = '',
+    follow_up_date: str = '',
 ) -> dict[str, str]:
     return {
         'Status': status,
@@ -456,6 +531,7 @@ def _props(
         'Next Actionable Step': next_step,
         'Success Condition': success_condition,
         'List Category': list_category,
+        'Follow-Up Date': follow_up_date,
     }
 
 

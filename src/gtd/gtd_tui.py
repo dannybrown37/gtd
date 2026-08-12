@@ -46,7 +46,9 @@ from gtd.notion.schema import (
     AGENDA_STATUS,
     STATUSES,
     STATUS_ICONS,
+    WAITING_FOR_STATUS,
     agenda_person_from_header,
+    default_waiting_for_follow_up,
     is_agenda_context,
     is_agenda_entry,
     strip_agenda_person,
@@ -1525,15 +1527,19 @@ class BaseEntryContent(Vertical):
                     )
 
         if not entry.follow_up_date:
+            waiting = status == WAITING_FOR_STATUS
             follow_up_prompt = (
                 'Follow-up date (required)'
-                if status == 'Waiting For'
+                if waiting
                 else 'Follow-up date (blank to skip)'
             )
             follow_str = await self.app.push_screen_wait(
                 InputModal(
                     follow_up_prompt,
                     'e.g. Friday, in 3 days',
+                    initial=(
+                        default_waiting_for_follow_up() if waiting else ''
+                    ),
                     subtitle=subtitle,
                 )
             )
@@ -2601,7 +2607,8 @@ class NextStepsContent(BaseEntryContent):
                 'Waiting For',
                 'Who/what are you waiting on?',
                 initial1=entry.next_step or '',
-                label2='Follow-up date (optional)',
+                label2='Follow-up date (required)',
+                initial2=default_waiting_for_follow_up(),
                 placeholder2='e.g. Friday, in 3 days',
             )
         )
