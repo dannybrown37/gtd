@@ -14,7 +14,6 @@ from gtd.notion.client import (
 )
 from gtd.notion.entries import _entry_preview_text, _parse_date_input
 from gtd.notion.log import (
-    _infer_cadence,
     _infer_reschedule_days,
     _is_recurring,
 )
@@ -319,9 +318,6 @@ class TestCadenceInference:
     )
     def test_non_recurring_returns_none(self, header: str):
         assert _infer_reschedule_days(header) is None
-
-    def test_infer_cadence_defaults_to_weekly(self):
-        assert _infer_cadence('No prefix') == 'weekly'
 
     def test_is_recurring_delegates_to_infer(self):
         entry = ProjectEntry(

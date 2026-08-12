@@ -18,7 +18,7 @@ from gtd.notion.entries import (
     _parse_date_input,
     select_entry,
 )
-from gtd.notion.log import _confirm_delete, _log_and_reschedule_entry
+from gtd.notion.log import _confirm_delete, reschedule_only
 from gtd.notion.views import next_steps_entries
 from gtd.ui import fzf_on_a_list, prompt_input
 
@@ -45,7 +45,7 @@ def list_today() -> None:  # noqa: C901, PLR0912
 
         action = fzf_on_a_list(
             [
-                'Log & Reschedule',
+                'Reschedule',
                 'Snooze until tomorrow',
                 'Waiting For',
                 'Update fields',
@@ -61,11 +61,11 @@ def list_today() -> None:  # noqa: C901, PLR0912
         tomorrow = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
 
         match action:
-            case 'Log & Reschedule':
-                _log_and_reschedule_entry(entry)
-                actionable = [
-                    e for e in actionable if e.page_id != entry.page_id
-                ]
+            case 'Reschedule':
+                if reschedule_only(entry):
+                    actionable = [
+                        e for e in actionable if e.page_id != entry.page_id
+                    ]
             case 'Snooze until tomorrow':
                 props = build_property_update(
                     follow_up_date=tomorrow,

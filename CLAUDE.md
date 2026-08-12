@@ -24,7 +24,7 @@ src/gtd/
     ├── entries.py  # fzf entry picker, preview text, interactive field editing
     ├── triage.py   # Triage flow logic; TRIAGE_STATUSES
     ├── capture.py  # Inbox capture
-    ├── log.py      # Log & reschedule; _is_recurring, _infer_reschedule_days
+    ├── log.py      # reschedule_only (CLI); _is_recurring, _infer_reschedule_days
     ├── today.py    # Today filter logic
     ├── models.py   # ProjectEntry dataclass
     ├── schema.py   # Notion DB schema: STATUSES (includes Recurring), STATUS_ICONS
@@ -253,6 +253,8 @@ Two-mode design: opens in **browse mode** (ListView focused, j/k navigate). **Ta
 - `_shared_reschedule_only(app, entry)` — sets a recurring entry's next follow-up date and nothing else. Infers the date from a cadence header prefix (`Daily:`/`Weekly:`/`2x/week:`/`3x/week:`, see `_infer_reschedule_days`) and only asks a `ConfirmModal` to accept it; declining falls through to the manual `InputModal` rather than cancelling. Returns new date string or None.
 
   It replaced `_shared_log_and_reschedule`, which opened `$EDITOR` on the notes body and prompted for a Context before reaching the date — three interactions for one decision — and applied an inferred date silently with no confirmation. That function's only live caller was `action_mark_done`'s *Reschedule* branch; the two other callers (`BaseEntryContent.action_log_and_reschedule`, `NextStepsContent.action_log`) had no key binding on any widget and were deleted with it. `TestNoDeadRescheduleActions` guards against re-adding an unbound action of that shape.
+
+  **The CLI now follows the same model.** `notion/log.py` kept a parallel `_log_and_reschedule_entry` for another release — same `$EDITOR`-then-reschedule shape, same silent inferred date — reachable only from `gtd log`, its `Log & Reschedule` menu entry, and the same-named action inside `gtd today`. None of the three existed in the TUI or the webapp, so the log-a-note-first combo was retired outright: `gtd log`, `log_and_reschedule`, `_log_and_reschedule_entry` and the dead `_infer_cadence` are gone. Rescheduling itself survives as `reschedule_only(entry)` — infer from the cadence prefix, confirm `(Y/n)`, fall through to the manual prompt when declined — and `gtd today`'s action is now plain **Reschedule**. `tests/test_cli_reschedule.py` pins both halves: that the old names stay gone, and that `reschedule_only` never reaches for `$EDITOR`, `subprocess` or `replace_page_body`.
 - `_shared_edit_notes(app, entry, notes_cache, refresh_cb)` — opens editor, saves notes only.
 - `_prompt_and_get_props(app, entry, field)` — prompts for a single field update, returns props dict.
 

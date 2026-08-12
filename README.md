@@ -156,7 +156,6 @@ without opening the TUI:
 | `gtd filter` | Filter by context name (e.g. gtd filter Phone). |
 | `gtd today` | Show actionable items for today. |
 | `gtd snooze` | Snooze today's items until tomorrow. |
-| `gtd log` | Log a note and reschedule a recurring item. |
 | `gtd done` | Mark a current project as done (archives it). |
 | `gtd review` | Run the GTD weekly review ritual. |
 | `gtd update` | Update fields on an existing project. |
@@ -190,7 +189,6 @@ An older fzf-driven menu predating the TUI, kept for anyone who prefers it:
 | Category | Action |
 | --- | --- |
 | Do | Today |
-| Do | Log & Reschedule |
 | Do | Snooze until tomorrow |
 | Do | Capture new item |
 | Do | Brain dump |
@@ -296,7 +294,7 @@ src/gtd/
 │   ├── display.py  # Display formatting for Notion entries.
 │   ├── entries.py  # Entry listing, selection, and field editing.
 │   ├── init.py     # Database initialization and schema management for GTD CLI.
-│   ├── log.py      # Log, reschedule, and recurring-item utilities.
+│   ├── log.py      # Reschedule and recurring-item utilities.
 │   ├── models.py   # Parse Notion page properties into simple data structures.
 │   ├── review.py   # Weekly review and Someday/Maybe review flows.
 │   ├── schema.py   # GTD Notion database schema definition — single source of truth.

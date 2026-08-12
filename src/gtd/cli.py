@@ -91,19 +91,6 @@ def snooze() -> None:
         return
 
 
-@cli.command(name='log')
-def log_cmd() -> None:
-    """Log a note and reschedule a recurring item."""
-    from gtd.notion.log import (
-        log_and_reschedule,
-    )
-
-    try:
-        log_and_reschedule()
-    except CancelAction:
-        return
-
-
 @cli.command()
 def done() -> None:
     """Mark a current project as done (archives it)."""
@@ -328,7 +315,6 @@ def _interactive_menu(verbose: bool) -> None:  # noqa: C901, PLR0912, PLR0915
         list_entries,
         update_entry,
     )
-    from gtd.notion.log import log_and_reschedule
     from gtd.notion.review import (
         brain_dump,
         review_someday,
@@ -358,7 +344,6 @@ def _interactive_menu(verbose: bool) -> None:  # noqa: C901, PLR0912, PLR0915
 
     menu_items = [
         ('Do', 'Today'),
-        ('Do', 'Log & Reschedule'),
         ('Do', 'Snooze until tomorrow'),
         ('Do', 'Capture new item'),
         ('Do', 'Brain dump'),
@@ -402,8 +387,6 @@ def _interactive_menu(verbose: bool) -> None:  # noqa: C901, PLR0912, PLR0915
             match action:
                 case 'Today':
                     list_today()
-                case 'Log & Reschedule':
-                    log_and_reschedule()
                 case 'Snooze until tomorrow':
                     snooze_today()
                 case 'View all projects':
