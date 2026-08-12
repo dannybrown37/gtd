@@ -141,7 +141,7 @@ def test_entries_incubation_keeps_only_future_follow_ups(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """`follow_up=future` is the Incubation tab: deferred, not yet due."""
-    monkeypatch.setattr(api, '_get_timezone_iso_date', lambda: '2026-08-06')
+    monkeypatch.setattr(api, '_today_iso', lambda: '2026-08-06')
     entries = [
         make_entry(page_id='past', follow_up_date='2026-08-01'),
         make_entry(page_id='today', follow_up_date='2026-08-06'),
@@ -162,7 +162,7 @@ def test_entries_due_excludes_future_follow_ups(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """`follow_up=due` is the complement — what is actionable now."""
-    monkeypatch.setattr(api, '_get_timezone_iso_date', lambda: '2026-08-06')
+    monkeypatch.setattr(api, '_today_iso', lambda: '2026-08-06')
     entries = [
         make_entry(page_id='past', follow_up_date='2026-08-01'),
         make_entry(page_id='future', follow_up_date='2026-09-01'),
@@ -319,7 +319,7 @@ def test_snooze_defaults_to_tomorrow(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Mirrors the TUI's `T` (wait_tomorrow) binding."""
-    monkeypatch.setattr(api, '_get_timezone_iso_date', lambda: '2026-08-06')
+    monkeypatch.setattr(api, '_today_iso', lambda: '2026-08-06')
     update = MagicMock()
     monkeypatch.setattr(api, 'update_page', update)
     monkeypatch.setattr(
@@ -338,7 +338,7 @@ def test_snooze_accepts_explicit_days(
     auth_header: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(api, '_get_timezone_iso_date', lambda: '2026-08-06')
+    monkeypatch.setattr(api, '_today_iso', lambda: '2026-08-06')
     update = MagicMock()
     monkeypatch.setattr(api, 'update_page', update)
     monkeypatch.setattr(
@@ -440,9 +440,7 @@ TODAY = '2026-08-11'
 @pytest.fixture
 def fixed_today(monkeypatch: pytest.MonkeyPatch) -> None:
     """Pin the server's idea of today so date tests don't drift."""
-    monkeypatch.setattr(
-        api, '_get_timezone_iso_date', MagicMock(return_value=TODAY)
-    )
+    monkeypatch.setattr(api, '_today_iso', MagicMock(return_value=TODAY))
 
 
 def next_steps_headers(
@@ -635,6 +633,40 @@ def test_contexts_offers_only_contexts_next_steps_can_return(
     response = client.get('/contexts', headers=auth_header)
 
     assert response.get_json()['contexts'] == ['Errands']
+
+
+# endregion
+
+
+# region "Today" agrees across surfaces
+
+
+class TestTodayIsTheMachinesToday:
+    """One idea of today, taken from the clock the user is looking at.
+
+    `api.py` pinned a hardcoded Eastern zone while the TUI used a naive
+    `datetime.now()`, so date-gated views could disagree by a day.
+    Each user runs their own instance, so system-local is both surfaces'
+    answer — and it follows the user if they travel.
+    """
+
+    def test_matches_the_system_date(self) -> None:
+        from datetime import datetime
+
+        assert api._today_iso() == datetime.now().date().isoformat()  # noqa: SLF001
+
+    def test_api_pins_no_timezone(self) -> None:
+        from pathlib import Path
+
+        source = Path(api.__file__).read_text()
+        assert 'ZoneInfo(' not in source
+
+    def test_webapp_does_not_use_utc(self) -> None:
+        """`new Date().toISOString()` is UTC — a day early every US evening."""
+        from pathlib import Path
+
+        app_js = Path(api.__file__).parent / 'webapp' / 'app.js'
+        assert '.toISOString().slice' not in app_js.read_text()
 
 
 # endregion

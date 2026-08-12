@@ -120,14 +120,23 @@ function formatDate(iso) {
   return `${m}/${d}`;
 }
 
+// toISOString() is UTC, so it rolls over to tomorrow every evening west of
+// Greenwich -- an item due today read as overdue after ~8pm Eastern. Format
+// off the local date parts instead, so the browser agrees with the machine
+// running the API.
+function localISO(d) {
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
 function todayISO() {
-  return new Date().toISOString().slice(0, 10);
+  return localISO(new Date());
 }
 
 function addDaysISO(days) {
   const d = new Date();
   d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
+  return localISO(d);
 }
 
 async function apiFetch(path, options = {}) {
@@ -1189,9 +1198,7 @@ async function openTriageModal(entry) {
 const WAITING_FOR_DEFAULT_FOLLOW_UP_DAYS = 7;
 
 function defaultWaitingFollowUp() {
-  const d = new Date();
-  d.setDate(d.getDate() + WAITING_FOR_DEFAULT_FOLLOW_UP_DAYS);
-  return d.toISOString().slice(0, 10);
+  return addDaysISO(WAITING_FOR_DEFAULT_FOLLOW_UP_DAYS);
 }
 
 function optionGrid(name, options, selected) {

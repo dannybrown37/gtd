@@ -10,7 +10,6 @@ from functools import wraps
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 from urllib.parse import unquote_plus
-from zoneinfo import ZoneInfo
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -113,8 +112,16 @@ def _entry_dict(e: ProjectEntry, excluded: list[str] | None = None) -> dict:
     return {k: v for k, v in asdict(e).items() if k not in excluded}
 
 
-def _get_timezone_iso_date() -> str:
-    return datetime.now(ZoneInfo('America/New_York')).date().isoformat()
+def _today_iso() -> str:
+    """Today, in the system's local timezone — the same "today" the TUI means.
+
+    This used to pin a hardcoded Eastern zone while every other
+    surface used a naive datetime.now(), so a date-gated view could mean
+    different days on the phone and in the terminal. Each user runs their
+    own instance against their own Notion DB, so the machine's clock is
+    already the right answer, and it follows you if you move.
+    """
+    return datetime.now().date().isoformat()
 
 
 def _get_page_by_id(page_id: str) -> dict | None:
@@ -455,7 +462,7 @@ def entries() -> Any:
         status,
         context=unquote_plus(context) if context else None,
         follow_up=request.args.get('follow_up'),
-        today=_get_timezone_iso_date(),
+        today=_today_iso(),
     )
 
     found.sort(key=lambda e: (e.due_date or '9999-99-99', e.header.lower()))
@@ -527,7 +534,7 @@ def snooze(page_id: str) -> Any:
             days = int(body.get('days', 1))
         except (TypeError, ValueError):
             return jsonify(error='days must be an integer'), 400
-        today = datetime.fromisoformat(_get_timezone_iso_date()).date()
+        today = datetime.fromisoformat(_today_iso()).date()
         target = (today + timedelta(days=days)).isoformat()
 
     try:
@@ -554,7 +561,7 @@ def capture() -> Any:
 def contexts() -> Any:
     """Get active contexts.
 
-    'Work' only shown during work hours (7am-5:30pm ET, Mon-Fri).
+    'Work' only shown during work hours (7am-5:30pm, Mon-Fri).
     """
     work_start_hour = 7
     work_end_hour = 17
@@ -565,11 +572,11 @@ def contexts() -> Any:
     # Next Steps view exactly. Deriving it separately meant `/next-steps`
     # could return an item under a context `/contexts` never offered --
     # unreachable through the picker.
-    entries = next_steps_entries(_get_timezone_iso_date())
+    entries = next_steps_entries(_today_iso())
     active_contexts = {e.context for e in entries if e.context}
 
     # Filter out 'Work' if not during work hours
-    now = datetime.now(ZoneInfo('America/New_York'))
+    now = datetime.now()
     weekday = now.weekday()  # 0=Monday, 6=Sunday
     hour = now.hour
     minute = now.minute
@@ -593,7 +600,7 @@ def contexts() -> Any:
 @require_auth
 def next_steps() -> Any:
     """Get actionable next steps, optionally filtered by context."""
-    entries = next_steps_entries(_get_timezone_iso_date())
+    entries = next_steps_entries(_today_iso())
     context = request.args.get('context')
     if context:
         context = unquote_plus(context)
