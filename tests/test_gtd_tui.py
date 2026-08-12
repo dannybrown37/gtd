@@ -32,6 +32,7 @@ from gtd.gtd_tui import (
     SomedayContent,
     WaitingForBrowseScreen,
     _classify_network_error,
+    _due_markup,
     _open_steps_editor,
     _render_entry_detail,
     _render_entry_summary,
@@ -151,6 +152,70 @@ class TestRenderEntrySummary:
     def test_shows_next_step(self):
         result = _render_entry_summary(_entry(next_step='Write tests'))
         assert 'Write tests' in result
+
+
+class TestOverdueDueDates:
+    """A due date that has passed must not read like one that hasn't.
+
+    Overdue items surface on Next Steps through the Due Date escape hatch
+    even while snoozed, so `[yellow]` for both states hides the one thing
+    the escape hatch exists to show.
+    """
+
+    @staticmethod
+    def _iso(offset_days: int) -> str:
+        return (datetime.now() + timedelta(days=offset_days)).strftime(
+            '%Y-%m-%d'
+        )
+
+    @pytest.mark.parametrize(
+        ('due', 'today', 'expected'),
+        [
+            ('2026-08-05', '2026-08-11', '[red]Aug 5[/red]'),
+            ('2026-08-11', '2026-08-11', '[yellow]Aug 11[/yellow]'),
+            ('2026-08-20', '2026-08-11', '[yellow]Aug 20[/yellow]'),
+        ],
+    )
+    def test_colour_by_whether_the_date_has_passed(self, due, today, expected):
+        assert _due_markup(due, today=today) == expected
+
+    def test_empty_due_date_renders_nothing(self):
+        assert _due_markup('', today='2026-08-11') == ''
+        assert _due_markup(None, today='2026-08-11') == ''
+
+    def test_unparseable_date_keeps_its_raw_text(self):
+        assert _due_markup('someday', today='2026-08-11') == (
+            '[yellow]someday[/yellow]'
+        )
+
+    def test_today_defaults_to_now(self):
+        assert '[red]' in _due_markup(self._iso(-3))
+        assert '[yellow]' in _due_markup(self._iso(+3))
+
+    def test_summary_reddens_an_overdue_date(self):
+        out = _render_entry_summary(_entry(due_date=self._iso(-2)))
+        assert '[red]' in out
+        assert '[yellow]' not in out
+
+    def test_summary_keeps_yellow_for_a_future_date(self):
+        assert '[yellow]' in _render_entry_summary(
+            _entry(due_date=self._iso(+2))
+        )
+
+    def test_next_step_row_reddens_an_overdue_date(self):
+        out = NextStepListItem._format(  # noqa: SLF001
+            _entry(due_date=self._iso(-2), next_step='Call the vet')
+        )
+        assert '[red]' in out
+        assert '[yellow]' not in out
+
+    def test_detail_pane_reddens_an_overdue_date(self):
+        out = _render_entry_detail(_entry(due_date=self._iso(-2)), notes='')
+        assert '[red]' in out
+
+    def test_detail_pane_keeps_yellow_for_a_future_date(self):
+        out = _render_entry_detail(_entry(due_date=self._iso(+2)), notes='')
+        assert '[yellow]' in out
 
 
 class TestClassifyNetworkError:
@@ -1360,10 +1425,11 @@ class TestAgendaRowRendering:
         assert out == '[cyan]→[/cyan] @Sam'
 
     def test_agenda_row_keeps_its_due_date(self):
+        due = (datetime.now() + timedelta(days=2)).strftime('%Y-%m-%d')
         out = NextStepListItem._format(  # noqa: SLF001
-            self._entry(due_date='2026-08-09')
+            self._entry(due_date=due)
         )
-        assert '[yellow]Aug 9[/yellow]' in out
+        assert f'[yellow]{datetime.fromisoformat(due):%b %-d}[/yellow]' in out
 
     def test_agenda_item_with_a_real_step_renders_normally(self):
         out = NextStepListItem._format(  # noqa: SLF001

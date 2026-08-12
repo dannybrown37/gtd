@@ -148,7 +148,7 @@ def _render_entry_detail(entry: ProjectEntry, notes: str | None = None) -> str: 
         lines.append(row('Next Step', entry.current_step))
     lines.append(row('Success', entry.success_condition))
     if entry.due_date:
-        lines.append(row('Due', entry.due_date, 'yellow'))
+        lines.append(row('Due', entry.due_date, _due_colour(entry.due_date)))
     if entry.follow_up_date:
         lines.append(row('Follow-up', entry.follow_up_date, 'cyan'))
     if entry.created_date:
@@ -190,16 +190,33 @@ def _render_entry_detail(entry: ProjectEntry, notes: str | None = None) -> str: 
     return '\n'.join(lines)
 
 
+def _due_colour(due_date: str | None, *, today: str | None = None) -> str:
+    today = today or datetime.now().strftime('%Y-%m-%d')
+    return 'red' if due_date and due_date < today else 'yellow'
+
+
+def _due_markup(due_date: str | None, *, today: str | None = None) -> str:
+    """Render a due date, reddened once it has passed.
+
+    A due date is a promise to someone else, and an overdue one surfaces on
+    Next Steps even through a snooze -- painting both states yellow hides
+    exactly what that escape hatch exists to show.
+    """
+    if not due_date:
+        return ''
+    colour = _due_colour(due_date, today=today)
+    try:
+        label = f'{datetime.fromisoformat(due_date):%b %-d}'
+    except ValueError:
+        label = due_date
+    return f'[{colour}]{label}[/{colour}]'
+
+
 def _render_entry_summary(entry: ProjectEntry) -> str:
     icon = STATUS_ICONS.get(entry.status, '·')
     ctx = f'  [dim][{entry.context}][/dim]' if entry.context else ''
-    due = ''
-    if entry.due_date:
-        try:
-            d = datetime.fromisoformat(entry.due_date)
-            due = f'  [yellow]{d:%b %-d}[/yellow]'
-        except ValueError:
-            due = f'  [yellow]{entry.due_date}[/yellow]'
+    marked = _due_markup(entry.due_date)
+    due = f'  {marked}' if marked else ''
     next_step = (
         f'\n  [dim]→ {entry.current_step}[/dim]' if entry.current_step else ''
     )
@@ -497,11 +514,8 @@ class NextStepListItem(EntryListItem):
     def _format(entry: ProjectEntry) -> str:
         step = entry.current_step
         project = entry.header.strip()
-        due = ''
-        if entry.due_date:
-            with contextlib.suppress(ValueError):
-                d = datetime.fromisoformat(entry.due_date)
-                due = f'  [yellow]{d:%b %-d}[/yellow]'
+        marked = _due_markup(entry.due_date)
+        due = f'  {marked}' if marked else ''
         if step:
             return f'[cyan]→[/cyan] {step}\n  [dim]{project}{due}[/dim]'
         if is_agenda_entry(entry):

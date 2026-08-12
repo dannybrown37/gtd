@@ -157,6 +157,11 @@ body {
   margin-top: 4px;
 }
 
+.entry-meta .overdue {
+  color: var(--danger);
+  font-weight: 600;
+}
+
 /* Area sections on Someday/Maybe — the webapp's answer to the TUI's grouped
    left pane, with the per-area rename/remove keys as tappable buttons. */
 .group-header {

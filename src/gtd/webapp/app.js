@@ -272,17 +272,22 @@ function entryRow(entry, onTap) {
   const li = document.createElement('li');
   li.className = 'entry';
   li.dataset.pageId = entry.page_id;
+  const overdue = entry.due_date && entry.due_date < todayISO();
+  // Each bit is HTML, not text -- escape as it goes in.
   const bits = [
-    entry.context,
-    entry.area,
-    entry.due_date && `due ${formatDate(entry.due_date)}`,
-    entry.follow_up_date && `→ ${formatDate(entry.follow_up_date)}`,
+    entry.context && escapeHtml(entry.context),
+    entry.area && escapeHtml(entry.area),
+    // An overdue date is the one piece of meta that has to stand out: it
+    // surfaces through a snooze, so it must not read like any other date.
+    entry.due_date &&
+      `<span${overdue ? ' class="overdue"' : ''}>due ${escapeHtml(formatDate(entry.due_date))}</span>`,
+    entry.follow_up_date && `→ ${escapeHtml(formatDate(entry.follow_up_date))}`,
   ].filter(Boolean);
   li.innerHTML = `
     <div class="entry-main">
       <div class="entry-header">${escapeHtml(entry.header)}</div>
       ${entry.next_step ? `<div class="entry-sub">${escapeHtml(entry.next_step)}</div>` : ''}
-      ${bits.length ? `<div class="entry-meta">${escapeHtml(bits.join(' · '))}</div>` : ''}
+      ${bits.length ? `<div class="entry-meta">${bits.join(' · ')}</div>` : ''}
     </div>
     <span class="chevron" aria-hidden="true">›</span>
   `;
