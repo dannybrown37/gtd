@@ -162,7 +162,9 @@ The fix is a **default at the single write chokepoint, not validation at six cal
 
 Two view consequences, both in `views.py`:
 
-- `_today_filter` is now an **`or` of two branches** — `(Current Project | Recurring) AND any date signal` (including *no* date), plus `_waiting_for_due_clause()`: `Waiting For AND Follow-Up Date on_or_before today`. Note the asymmetry — an *unset* Follow-Up Date admits nothing in the second branch, or the whole Waiting For list would move into Next Steps permanently. `is_due_today` mirrors it with a leading `WAITING_FOR_STATUS` branch.
+- `_today_filter` admits two populations — `(Current Project | Recurring) AND any date signal` (including *no* date), plus `_waiting_for_due_clause()`: `Waiting For AND Follow-Up Date on_or_before today`. Note the asymmetry — an *unset* Follow-Up Date admits nothing in the second branch, or the whole Waiting For list would move into Next Steps permanently. `is_due_today` mirrors it with a leading `WAITING_FOR_STATUS` branch.
+
+  **Notion accepts exactly two levels of filter nesting**, so this is emitted as a *flat* `or` of `and` pairs — one `{status AND date signal}` per combination — not the `or → and → or` it reads as. Written the natural way (which shipped, and broke Next Steps on every surface: 400 in the TUI, 500 in the webapp) Notion rejects the entire query with `body.filter.or[0].and[0].title should be defined` — it stops descending after two levels and expects a property filter where it finds a compound. Consequence: `_status_clause` with more than one status is itself an `or`, so it can only ever appear at the top level of a filter. `TestNotionNestingLimit` checks the depth of every filter `views.py` builds.
 - Items predating the default are rescued by `needs_follow_up_date()`, surfaced via `inbox_filter()` the same way a Current Project with no next action is. `drop_triaged_agenda_items()` exempts them, or an agenda-shaped Waiting For would be dropped straight back out.
 
 ### Waiting For tab (Weekly Review)

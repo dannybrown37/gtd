@@ -64,11 +64,8 @@ def _today_str() -> str:
 # region Next Steps
 
 
-def _today_filter(today: str) -> dict:
-    """Build the Notion filter for today's actionable items.
-
-    An item surfaces when its tickler has come due (Follow-Up Date on or
-    before today, or never set) *or* when it is due today or overdue.
+def _active_date_clauses(today: str) -> list[dict]:
+    """The date signals that admit a Current Project / Recurring item.
 
     The Due Date disjunct is what stops a snooze from burying a commitment:
     a Follow-Up Date is a note to yourself, a Due Date is a promise to
@@ -76,29 +73,35 @@ def _today_filter(today: str) -> dict:
     asymmetry -- an *unset* Due Date admits nothing, or every snoozed item
     in the database would come back.
     """
+    return [
+        {'property': 'Follow-Up Date', 'date': {'on_or_before': today}},
+        {'property': 'Follow-Up Date', 'date': {'is_empty': True}},
+        {'property': 'Due Date', 'date': {'on_or_before': today}},
+    ]
+
+
+def _today_filter(today: str) -> dict:
+    """Build the Notion filter for today's actionable items.
+
+    An item surfaces when its tickler has come due (Follow-Up Date on or
+    before today, or never set) *or* when it is due today or overdue.
+
+    **Notion allows exactly two levels of filter nesting**, so this is a
+    flat `or` of `and` pairs -- (one status AND one date signal) -- rather
+    than the `or -> and -> or` it reads as. Expressed the natural way,
+    Notion rejects the whole query with a 400 (`or[0].and[0].title should
+    be defined`): it stops descending after two levels and expects a
+    property filter where it finds another compound. `_status_clause` with
+    more than one status is itself an `or`, so it can only ever appear at
+    the top level -- see `test_no_filter_nests_more_than_twice`.
+    """
     return {
         'or': [
-            {
-                'and': [
-                    _status_clause(NEXT_STEP_STATUSES),
-                    {
-                        'or': [
-                            {
-                                'property': 'Follow-Up Date',
-                                'date': {'on_or_before': today},
-                            },
-                            {
-                                'property': 'Follow-Up Date',
-                                'date': {'is_empty': True},
-                            },
-                            {
-                                'property': 'Due Date',
-                                'date': {'on_or_before': today},
-                            },
-                        ],
-                    },
-                ],
-            },
+            *(
+                {'and': [_status_clause(status), date_clause]}
+                for status in NEXT_STEP_STATUSES
+                for date_clause in _active_date_clauses(today)
+            ),
             _waiting_for_due_clause(today),
         ],
     }

@@ -15,6 +15,7 @@ import pytest
 
 from gtd.notion.models import ProjectEntry
 from gtd.notion.views import (
+    NEXT_STEP_STATUSES,
     _follow_up_clause,
     _status_clause,
     _today_filter,
@@ -151,83 +152,146 @@ class TestIsActionable:
 # --- _today_filter: what Next Steps asks Notion for ---
 
 
-def _active_branch(today: str = TODAY) -> dict:
-    """The Current Project / Recurring half of `_today_filter`."""
-    return _today_filter(today)['or'][0]
+def _active_branches(today: str = TODAY) -> list[dict]:
+    """The Current Project / Recurring half of `_today_filter`.
+
+    One `and` pair per (status, date signal) combination -- the filter is
+    flat because Notion only nests two deep.
+    """
+    return [
+        branch
+        for branch in _today_filter(today)['or']
+        if branch['and'][0]['select']['equals'] in NEXT_STEP_STATUSES
+    ]
+
+
+def _date_clauses_for(status: str, today: str = TODAY) -> list[dict]:
+    return [
+        branch['and'][1]
+        for branch in _active_branches(today)
+        if branch['and'][0]['select']['equals'] == status
+    ]
+
+
+def _filter_depth(node) -> int:
+    """How many levels of compound (`and`/`or`) a filter nests."""
+    if isinstance(node, dict) and ('and' in node or 'or' in node):
+        children = node.get('and') or node.get('or')
+        return 1 + max(_filter_depth(child) for child in children)
+    return 0
+
+
+class TestNotionNestingLimit:
+    """Notion accepts exactly two levels of filter nesting.
+
+    A third level is not silently ignored -- the API 400s the whole query
+    (`body.filter.or[0].and[0].title should be defined`: it stops
+    descending and expects a property filter). `_today_filter` shipped as
+    `or -> and -> or` and broke every Next Steps surface at once, the TUI
+    with the raw 400 and the webapp with a 500 on top of it.
+    """
+
+    @pytest.mark.parametrize(
+        ('name', 'built'),
+        [
+            ('_today_filter', _today_filter(TODAY)),
+            ('inbox_filter', inbox_filter()),
+            ('status_filter (single status)', status_filter('List')),
+            (
+                'status_filter (many statuses, narrowed)',
+                status_filter(
+                    ['Current Project', 'Recurring'],
+                    context='@Computer',
+                    list_category='Books',
+                    follow_up='due',
+                    today=TODAY,
+                ),
+            ),
+        ],
+    )
+    def test_no_filter_nests_more_than_twice(self, name: str, built: dict):
+        assert _filter_depth(built) <= 2, f'{name} would 400'
 
 
 class TestTodayFilter:
     def test_matches_only_active_statuses(self):
-        status_clause = _active_branch()['and'][0]['or']
-        statuses = [c['select']['equals'] for c in status_clause]
+        statuses = [
+            b['and'][0]['select']['equals'] for b in _today_filter(TODAY)['or']
+        ]
 
-        assert statuses == ['Current Project', 'Recurring']
+        assert set(statuses) == {
+            'Current Project',
+            'Recurring',
+            'Waiting For',
+        }
 
     @pytest.mark.parametrize(
         'excluded',
-        ['Triage', 'Waiting For', 'Someday/Maybe', 'List'],
+        ['Triage', 'Someday/Maybe', 'List'],
     )
     def test_inactive_statuses_are_not_requested(self, excluded: str):
-        """Someday must never leak into Next Steps.
-
-        Waiting For is excluded from *this* branch too -- it reaches Next
-        Steps only through the separate due-tickler clause below, never on
-        status alone.
-        """
-        status_clause = _active_branch()['and'][0]['or']
-        statuses = [c['select']['equals'] for c in status_clause]
+        """Someday must never leak into Next Steps."""
+        statuses = [
+            b['and'][0]['select']['equals'] for b in _today_filter(TODAY)['or']
+        ]
 
         assert excluded not in statuses
 
-    def test_follow_up_clause_admits_due_and_unset_dates(self):
-        date_clause = _active_branch()['and'][1]['or']
+    @pytest.mark.parametrize('status', ['Current Project', 'Recurring'])
+    def test_follow_up_clause_admits_due_and_unset_dates(self, status: str):
+        date_clauses = _date_clauses_for(status)
 
         assert {
             'property': 'Follow-Up Date',
             'date': {'on_or_before': TODAY},
-        } in date_clause
+        } in date_clauses
         assert {
             'property': 'Follow-Up Date',
             'date': {'is_empty': True},
-        } in date_clause
+        } in date_clauses
 
-    def test_future_follow_ups_are_excluded_by_on_or_before(self):
+    @pytest.mark.parametrize('status', ['Current Project', 'Recurring'])
+    def test_future_follow_ups_are_excluded_by_on_or_before(self, status: str):
         """Snoozed items stay hidden — the whole point of snoozing."""
-        date_clause = _active_branch()['and'][1]['or']
         bounds = [
             c['date']['on_or_before']
-            for c in date_clause
+            for c in _date_clauses_for(status)
             if c['property'] == 'Follow-Up Date'
             and 'on_or_before' in c['date']
         ]
 
         assert bounds == [TODAY]
 
-    def test_a_due_date_surfaces_an_item_a_snooze_would_hide(self):
-        date_clause = _active_branch()['and'][1]['or']
-
+    @pytest.mark.parametrize('status', ['Current Project', 'Recurring'])
+    def test_a_due_date_surfaces_an_item_a_snooze_would_hide(
+        self, status: str
+    ):
         assert {
             'property': 'Due Date',
             'date': {'on_or_before': TODAY},
-        } in date_clause
+        } in _date_clauses_for(status)
 
-    def test_undated_items_are_not_admitted_by_the_due_clause(self):
+    @pytest.mark.parametrize('status', ['Current Project', 'Recurring'])
+    def test_undated_items_are_not_admitted_by_the_due_clause(
+        self, status: str
+    ):
         """`is_empty` on Due Date would drag in every snoozed item."""
-        date_clause = _active_branch()['and'][1]['or']
         empties = [
-            c['property'] for c in date_clause if c['date'].get('is_empty')
+            c['property']
+            for c in _date_clauses_for(status)
+            if c['date'].get('is_empty')
         ]
 
         assert empties == ['Follow-Up Date']
 
-    def test_status_and_date_clauses_are_anded(self):
-        branch = _active_branch()
+    def test_every_branch_ands_one_status_with_one_date(self):
+        for branch in _today_filter(TODAY)['or']:
+            assert set(branch) == {'and'}
+            assert len(branch['and']) == 2
+            assert 'select' in branch['and'][0]
+            assert 'date' in branch['and'][1]
 
-        assert set(branch) == {'and'}
-        assert len(branch['and']) == 2
-        assert all('or' in clause for clause in branch['and'])
-
-    def test_the_two_branches_are_ored(self):
+    def test_both_populations_are_ored(self):
         """Two disjoint populations, not one narrowed one.
 
         Active items are admitted by *any* date signal (including none at
@@ -237,7 +301,7 @@ class TestTodayFilter:
         result = _today_filter(TODAY)
 
         assert set(result) == {'or'}
-        assert len(result['or']) == 2
+        assert len(_active_branches()) == 6
 
 
 class TestWaitingForDueClause:
@@ -250,12 +314,12 @@ class TestWaitingForDueClause:
     """
 
     def test_the_second_branch_is_waiting_for(self):
-        branch = _today_filter(TODAY)['or'][1]
+        branch = _today_filter(TODAY)['or'][-1]
 
         assert branch['and'][0] == _status_clause('Waiting For')
 
     def test_only_a_due_tickler_admits_it(self):
-        branch = _today_filter(TODAY)['or'][1]
+        branch = _today_filter(TODAY)['or'][-1]
 
         assert branch['and'][1] == {
             'property': 'Follow-Up Date',
@@ -264,7 +328,7 @@ class TestWaitingForDueClause:
 
     def test_an_unset_tickler_admits_nothing(self):
         """Otherwise the whole Waiting For list moves in permanently."""
-        branch = _today_filter(TODAY)['or'][1]
+        branch = _today_filter(TODAY)['or'][-1]
         date_clauses = [c for c in branch['and'][1:] if 'date' in c]
 
         assert not any(c['date'].get('is_empty') for c in date_clauses)
@@ -347,16 +411,16 @@ class TestNextStepsEntries:
         _, query = _run(next_steps_entries, [])
 
         filter_obj = query.call_args.kwargs['filter_obj']
-        date_clause = filter_obj['or'][0]['and'][1]['or']
-        assert date_clause[0]['date']['on_or_before'] == today
+        date_clause = filter_obj['or'][0]['and'][1]
+        assert date_clause['date']['on_or_before'] == today
 
     def test_the_caller_may_pin_today(self):
         """The API supplies a timezone-aware date; the TUI does not."""
         _, query = _run(lambda: next_steps_entries('2030-01-01'), [])
 
         filter_obj = query.call_args.kwargs['filter_obj']
-        date_clause = filter_obj['or'][0]['and'][1]['or']
-        assert date_clause[0]['date']['on_or_before'] == '2030-01-01'
+        date_clause = filter_obj['or'][0]['and'][1]
+        assert date_clause['date']['on_or_before'] == '2030-01-01'
 
 
 # --- inbox_filter / inbox_entries ---
