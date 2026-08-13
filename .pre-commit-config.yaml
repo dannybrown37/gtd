@@ -6,7 +6,7 @@ repos:
   # test hook, by recovering it from git's argv -- the commitizen hook below
   # runs in a separate git invocation and can only ever fail after the suite.
   - repo: https://github.com/dannybrown37/git-a-grip
-    rev: v0.8.1
+    rev: v0.11.0
     hooks:
       - id: commitizen-early
         fail_fast: true
@@ -14,6 +14,7 @@ repos:
       - id: ruff-format
       - id: pytest
         args: ['--runner=uv run --extra api pytest', tests/, -q]
+      - id: block-private-terms
 
   - repo: https://github.com/commitizen-tools/commitizen
     rev: v4.16.5
