@@ -36,6 +36,7 @@ from gtd.notion.client import (
     update_page,
     archive_page,
 )
+from gtd import storage
 from gtd.notion.models import ProjectEntry
 from gtd.notion.schema import STATUSES
 from gtd.notion.triage import TRIAGE_STATUSES
@@ -845,6 +846,80 @@ def done(page_id: str) -> Any:
     except (ValueError, RuntimeError, OSError) as err:
         return jsonify(error=f'Mark done failed: {err}'), 500
     return jsonify(deleted=True), 200
+
+
+# region Weekly review
+
+
+def _review_payload() -> dict:
+    """The weekly review's checklist state.
+
+    Deliberately local-only: it reads `~/.local/share/gtd/weekly_habits.json`
+    and never touches Notion, so a Notion outage can't take the checklist
+    down, and the phone and the TUI share one set of ticks. The per-step work
+    is done through the existing entry endpoints.
+    """
+    done = storage.load_review_state(len(storage.REVIEW_STEPS))
+    return {
+        'week_start': storage.current_week_start(),
+        'steps': [
+            {
+                'index': i,
+                'label': label,
+                'action': action,
+                'done': done[i],
+            }
+            for i, (label, action) in enumerate(storage.REVIEW_STEPS)
+        ],
+        'last_done': storage.get_weekly_habit_date(
+            storage.WEEKLY_REVIEW_HABIT
+        ),
+        'done_this_week': storage.habit_done_this_week(
+            storage.WEEKLY_REVIEW_HABIT
+        ),
+    }
+
+
+@app.get('/review')
+@require_auth
+def review() -> Any:
+    """Get this week's weekly review checklist and its progress."""
+    return jsonify(_review_payload())
+
+
+@app.post('/review/step/<int:index>')
+@require_auth
+def review_step(index: int) -> Any:
+    """Check or uncheck one weekly review step. Body: `{"done": bool}`."""
+    body = request.get_json(force=True, silent=True) or {}
+    if 'done' not in body:
+        return jsonify(error='Body must carry "done"'), 400
+    if not isinstance(body['done'], bool):
+        return jsonify(error='"done" must be true or false'), 400
+    try:
+        storage.set_review_step(index, done=body['done'])
+    except IndexError as err:
+        return jsonify(error=str(err)), 404
+    return jsonify(_review_payload())
+
+
+@app.post('/review/reset')
+@require_auth
+def review_reset() -> Any:
+    """Clear this week's weekly review progress. Mirrors the TUI's `X`."""
+    storage.reset_review_state()
+    return jsonify(_review_payload())
+
+
+@app.post('/review/complete')
+@require_auth
+def review_complete() -> Any:
+    """Mark the weekly review itself done for this week."""
+    storage.set_weekly_habit_date(storage.WEEKLY_REVIEW_HABIT)
+    return jsonify(_review_payload())
+
+
+# endregion
 
 
 @app.post('/triage/<page_id>')

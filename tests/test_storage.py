@@ -6,11 +6,14 @@ import pytest
 
 from gtd import storage
 from gtd.storage import (
-    _current_week_start,
+    REVIEW_STEPS,
+    current_week_start,
     get_weekly_habit_date,
+    habit_done_this_week,
     load_review_state,
     reset_review_state,
     save_review_state,
+    set_review_step,
     set_weekly_habit_date,
 )
 
@@ -80,7 +83,7 @@ class TestReviewState:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr(
-            storage, '_current_week_start', lambda: '2026-07-06'
+            storage, 'current_week_start', lambda: '2026-07-06'
         )
         state = {'week_start': '2026-07-06', 'steps_done': [True, False, True]}
         storage.HABITS_PATH.write_text(
@@ -90,7 +93,7 @@ class TestReviewState:
 
     def test_roundtrip(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
-            storage, '_current_week_start', lambda: '2026-07-06'
+            storage, 'current_week_start', lambda: '2026-07-06'
         )
         save_review_state([True, True, False])
         assert load_review_state(3) == [True, True, False]
@@ -99,7 +102,7 @@ class TestReviewState:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr(
-            storage, '_current_week_start', lambda: '2026-07-06'
+            storage, 'current_week_start', lambda: '2026-07-06'
         )
         save_review_state([True, True])
         assert load_review_state(4) == [False, False, False, False]
@@ -108,7 +111,7 @@ class TestReviewState:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr(
-            storage, '_current_week_start', lambda: '2026-07-06'
+            storage, 'current_week_start', lambda: '2026-07-06'
         )
         save_review_state([True, False])
         reset_review_state()
@@ -128,7 +131,7 @@ class TestReviewState:
         habit already completed this week.
         """
         monkeypatch.setattr(
-            storage, '_current_week_start', lambda: '2026-07-06'
+            storage, 'current_week_start', lambda: '2026-07-06'
         )
         set_weekly_habit_date('weekly_review')
         save_review_state([True, False])
@@ -144,7 +147,7 @@ class TestReviewState:
     ) -> None:
         """The same merge contract in the other direction."""
         monkeypatch.setattr(
-            storage, '_current_week_start', lambda: '2026-07-06'
+            storage, 'current_week_start', lambda: '2026-07-06'
         )
         save_review_state([True, True])
         set_weekly_habit_date('weekly_review')
@@ -155,7 +158,7 @@ class TestReviewState:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr(
-            storage, '_current_week_start', lambda: '2026-07-06'
+            storage, 'current_week_start', lambda: '2026-07-06'
         )
         set_weekly_habit_date('weekly_review')
         save_review_state([True, False])
@@ -169,7 +172,7 @@ class TestReviewState:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr(
-            storage, '_current_week_start', lambda: '2026-07-06'
+            storage, 'current_week_start', lambda: '2026-07-06'
         )
         set_weekly_habit_date('other_habit')
         save_review_state([True])
@@ -181,7 +184,7 @@ class TestReviewState:
         )
 
 
-# ── _current_week_start: drives the Monday reset ─────────────────────────────
+# ── current_week_start: drives the Monday reset ─────────────────────────────
 
 
 class TestCurrentWeekStart:
@@ -216,4 +219,82 @@ class TestCurrentWeekStart:
 
         monkeypatch.setattr(storage, 'datetime', _FixedDatetime)
 
-        assert _current_week_start() == expected_monday
+        assert current_week_start() == expected_monday
+
+
+# ── REVIEW_STEPS / set_review_step / habit_done_this_week ────────────────────
+
+
+class TestReviewSteps:
+    def test_every_step_is_a_label_and_an_action(self) -> None:
+        assert REVIEW_STEPS
+        for label, action in REVIEW_STEPS:
+            assert label.strip()
+            assert action.strip()
+
+    def test_the_tui_reads_this_list_rather_than_its_own(self) -> None:
+        """The API serves these to the webapp; a TUI copy would drift."""
+        from gtd import gtd_tui
+
+        assert gtd_tui._GTD_REVIEW_STEPS is REVIEW_STEPS  # noqa: SLF001
+
+
+class TestSetReviewStep:
+    def test_checks_one_step_and_returns_the_week(self) -> None:
+        steps = set_review_step(1, done=True)
+
+        assert steps[1] is True
+        assert steps == load_review_state(len(REVIEW_STEPS))
+
+    def test_unchecks_a_checked_step(self) -> None:
+        set_review_step(1, done=True)
+
+        assert set_review_step(1, done=False)[1] is False
+
+    def test_leaves_the_other_steps_alone(self) -> None:
+        set_review_step(0, done=True)
+        steps = set_review_step(2, done=True)
+
+        assert steps[0] is True
+        assert steps[1] is False
+        assert steps[2] is True
+
+    @pytest.mark.parametrize('index', [-1, len(REVIEW_STEPS)])
+    def test_rejects_an_index_outside_the_checklist(self, index: int) -> None:
+        with pytest.raises(IndexError):
+            set_review_step(index, done=True)
+
+
+class TestHabitDoneThisWeek:
+    def test_false_when_never_done(self) -> None:
+        assert habit_done_this_week('weekly_review') is False
+
+    def test_true_when_done_today(self) -> None:
+        set_weekly_habit_date('weekly_review')
+
+        assert habit_done_this_week('weekly_review') is True
+
+    def test_false_when_done_before_this_week(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        storage.HABITS_PATH.write_text(
+            json.dumps({'weekly_review': '2026-07-05'}) + '\n'
+        )
+        monkeypatch.setattr(
+            storage, 'current_week_start', lambda: '2026-07-06'
+        )
+
+        assert habit_done_this_week('weekly_review') is False
+
+    def test_true_on_the_week_start_itself(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Monday's review counts for the week that starts that Monday."""
+        storage.HABITS_PATH.write_text(
+            json.dumps({'weekly_review': '2026-07-06'}) + '\n'
+        )
+        monkeypatch.setattr(
+            storage, 'current_week_start', lambda: '2026-07-06'
+        )
+
+        assert habit_done_this_week('weekly_review') is True

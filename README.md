@@ -247,6 +247,10 @@ your own token.
 | `GET` | `/list/<category>` | Get all entries in a specific list category. |
 | `GET` | `/manifest.json` | Serve the PWA manifest. |
 | `GET` | `/next-steps` | Get actionable next steps, optionally filtered by context. |
+| `GET` | `/review` | Get this week's weekly review checklist and its progress. |
+| `POST` | `/review/complete` | Mark the weekly review itself done for this week. |
+| `POST` | `/review/reset` | Clear this week's weekly review progress. Mirrors the TUI's `X`. |
+| `POST` | `/review/step/<int:index>` | Check or uncheck one weekly review step. Body: `{"done": bool}`. |
 | `GET` | `/styles.css` | Serve the web app's stylesheet. |
 | `GET` | `/triage-schema` | Get schema for triage workflow: statuses and contexts per status. |
 | `POST` | `/triage/<page_id>` | Atomically triage an entry with full data. |

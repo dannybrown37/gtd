@@ -53,6 +53,7 @@ from gtd.notion.schema import (
     is_agenda_entry,
     strip_agenda_person,
 )
+from gtd.storage import REVIEW_STEPS
 from gtd.tui import (
     ConfirmModal,
     InputModal,
@@ -231,15 +232,9 @@ WEEKLY_HABITS: list[tuple[str, str]] = [
     ('weekly_review', 'Weekly Review'),
 ]
 
-_GTD_REVIEW_STEPS: list[tuple[str, str]] = [
-    ('Process Inbox', 'triage'),
-    ('Review Projects', 'projects'),
-    ('Review Waiting For', 'waiting'),
-    ('Review Someday/Maybe', 'someday'),
-    ('Review Horizons of Focus', 'areas'),
-    ('Review Calendar (Past & Upcoming)', 'manual'),
-    ("Plan Next Week's Priorities", 'manual'),
-]
+# Defined in storage.py so the HTTP API can serve the same list to the webapp
+# without importing Textual. Don't re-inline it here.
+_GTD_REVIEW_STEPS = REVIEW_STEPS
 
 _GTD_REVIEW_CHECKLIST = '\n'.join(
     f'  □ {label}' for label, _ in _GTD_REVIEW_STEPS
@@ -2535,21 +2530,22 @@ class NextStepsContent(BaseEntryContent):
             self._mark_habit_done(item)
 
     async def _run_weekly_review_flow(self) -> bool:
+        from gtd.notion.views import inbox_entries
+
         loop = asyncio.get_running_loop()
 
-        inbox_entries: list[ProjectEntry] = []
-        inbox_count = 0
+        # The local used to be named `inbox_entries` too, so the import below
+        # rebound it to the *function* and that was what reached the review —
+        # the triage step then seeded a function object instead of the entries.
+        found: list[ProjectEntry] = []
         try:
-            from gtd.notion.views import inbox_entries
-
             found = await loop.run_in_executor(None, inbox_entries)
-            inbox_count = len(found)
         except Exception:
-            inbox_count = 0
+            found = []
 
         return (
             await self.app.push_screen_wait(
-                WeeklyReviewScreen(inbox_entries, inbox_count)
+                WeeklyReviewScreen(found, len(found))
             )
             or False
         )

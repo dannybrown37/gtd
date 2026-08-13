@@ -1615,3 +1615,73 @@ class TestGroupsAreNotRemovedWhileOccupied:
         guard = source.split(occupancy)[1]
         assert 'ConfirmModal' not in guard
         assert 'move or drop them first' in guard
+
+
+class TestWeeklyReviewFlowSeedsRealEntries:
+    """The review's triage step must receive the inbox, not a function.
+
+    `_run_weekly_review_flow` declared a local named `inbox_entries` and then
+    did `from gtd.notion.views import inbox_entries` inside the same scope, so
+    the import rebound the local to the *function*. That function object — not
+    the entries — was what reached `WeeklyReviewScreen`, and the triage step
+    seeded it straight into the inbox tab.
+    """
+
+    def _run(self, fetched: list) -> tuple[object, int]:
+        from gtd.gtd_tui import NextStepsContent
+
+        captured: dict = {}
+
+        class _FakeApp:
+            async def push_screen_wait(self, screen) -> bool:
+                captured['screen'] = screen
+                return True
+
+        class _FakeContent:
+            app = _FakeApp()
+
+        async def run() -> None:
+            with patch('gtd.notion.views.inbox_entries', return_value=fetched):
+                await NextStepsContent._run_weekly_review_flow(_FakeContent())  # noqa: SLF001
+
+        asyncio.run(run())
+        screen = captured['screen']
+        return screen._inbox_entries, screen._inbox_count  # noqa: SLF001
+
+    def test_passes_the_entries_themselves(self) -> None:
+        entries = [_entry(header='a'), _entry(header='b')]
+
+        seeded, _ = self._run(entries)
+
+        assert seeded == entries
+
+    def test_counts_the_entries_it_passes(self) -> None:
+        seeded, count = self._run([_entry(header='a'), _entry(header='b')])
+
+        assert count == len(seeded) == 2
+
+    def test_a_notion_failure_degrades_to_an_empty_inbox(self) -> None:
+        from gtd.gtd_tui import NextStepsContent
+
+        captured: dict = {}
+
+        class _FakeApp:
+            async def push_screen_wait(self, screen) -> bool:
+                captured['screen'] = screen
+                return True
+
+        class _FakeContent:
+            app = _FakeApp()
+
+        def _boom() -> list:
+            msg = 'notion down'
+            raise RuntimeError(msg)
+
+        async def run() -> None:
+            with patch('gtd.notion.views.inbox_entries', _boom):
+                await NextStepsContent._run_weekly_review_flow(_FakeContent())  # noqa: SLF001
+
+        asyncio.run(run())
+
+        assert captured['screen']._inbox_entries == []  # noqa: SLF001
+        assert captured['screen']._inbox_count == 0  # noqa: SLF001
