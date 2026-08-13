@@ -33,9 +33,11 @@ from gtd.notion.schema import WAITING_FOR_DEFAULT_FOLLOW_UP_DAYS
 APP_JS = Path(__file__).parent.parent / 'src' / 'gtd' / 'webapp' / 'app.js'
 
 # Widgets whose bindings are user-facing actions: the app itself (global keys
-# like capture/refresh) plus the tab content widgets (per-entry actions). The
-# modal browse screens used during the Weekly Review are excluded — that whole
-# flow is tracked as one capability (see TUI_ONLY).
+# like capture/refresh), the tab content widgets (per-entry actions), and the
+# Weekly Review screens. The review used to be excluded here and tracked as
+# one deferred entry in TUI_ONLY, which meant nothing about that flow was
+# guarded at all — now that the webapp has it, its keys are derived like every
+# other one.
 TUI_WIDGETS = [
     gtd_tui.GTDApp,
     gtd_tui.BaseEntryContent,
@@ -47,6 +49,10 @@ TUI_WIDGETS = [
     gtd_tui.SomedayContent,
     gtd_tui.SnoozedContent,
     gtd_tui.ListsContent,
+    gtd_tui.WeeklyReviewScreen,
+    gtd_tui.ProjectsBrowseScreen,
+    gtd_tui.WaitingForBrowseScreen,
+    gtd_tui.SomedayBrowseScreen,
 ]
 
 # Actions with no webapp counterpart, each with the reason it can't have one.
@@ -63,17 +69,6 @@ TUI_ONLY = {
     'command_palette': 'keyboard navigation',
     'quit': 'no equivalent in a browser tab',
     'dismiss_cel': 'celebration animation is TUI chrome',
-    # Deferred by scope: the Weekly Review is a follow-up pass, not part of
-    # the core-actions parity work. (Area CRUD and List-category CRUD were
-    # part of that backlog and have since been ported.)
-    'complete_habit': 'Weekly Review not yet ported',
-    'complete_step': 'Weekly Review not yet ported',
-    'finish_step': 'Weekly Review not yet ported',
-    'change_status': 'Weekly Review not yet ported',
-    'toggle': 'Weekly Review not yet ported',
-    'reset': 'Weekly Review not yet ported',
-    'someday': 'Weekly Review browse screen; webapp uses move_someday',
-    'drop': 'Weekly Review browse screen; webapp uses drop_entry',
     'save': 'modal-internal binding',
     'cancel': 'modal-internal binding',
 }

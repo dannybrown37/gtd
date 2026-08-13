@@ -431,6 +431,120 @@ def test_done_still_archives_without_reschedule(
 # endregion
 
 
+# region complete-step
+
+
+class TestCompleteStep:
+    """`POST /entry/<id>/complete-step` — the TUI's `X` on an entry.
+
+    The renumbering itself stays in `notion/models.advance_steps`, the same
+    function the TUI calls. Reimplementing it in `app.js` would be a second
+    definition of what a step list is, which is the drift this repo keeps
+    getting bitten by.
+    """
+
+    def test_drops_the_first_step_and_renumbers(
+        self,
+        client: FlaskClient,
+        auth_header: dict[str, str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        entry = make_entry(next_step='1. Draft it\n2. Send it\n3. Chase it')
+        patch_query(monkeypatch, [entry])
+        update = MagicMock()
+        monkeypatch.setattr(api, 'update_page', update)
+        monkeypatch.setattr(
+            api,
+            '_get_page_by_id',
+            MagicMock(return_value={'id': 'entry-1'}),
+        )
+
+        response = client.post(
+            '/entry/entry-1/complete-step', headers=auth_header
+        )
+
+        assert response.status_code == 200
+        props = update.call_args[0][1]
+        written = props['Next Actionable Step']['rich_text'][0]['text'][
+            'content'
+        ]
+        assert written == '1. Send it\n2. Chase it'
+
+    def test_last_step_leaves_the_field_empty(
+        self,
+        client: FlaskClient,
+        auth_header: dict[str, str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        entry = make_entry(next_step='1. The only thing')
+        patch_query(monkeypatch, [entry])
+        update = MagicMock()
+        monkeypatch.setattr(api, 'update_page', update)
+        monkeypatch.setattr(
+            api,
+            '_get_page_by_id',
+            MagicMock(return_value={'id': 'entry-1'}),
+        )
+
+        response = client.post(
+            '/entry/entry-1/complete-step', headers=auth_header
+        )
+
+        assert response.status_code == 200
+        props = update.call_args[0][1]
+        written = props['Next Actionable Step']['rich_text'][0]['text'][
+            'content'
+        ]
+        assert written == ''
+
+    def test_nothing_to_complete_is_a_400_not_a_silent_no_op(
+        self,
+        client: FlaskClient,
+        auth_header: dict[str, str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        entry = make_entry(next_step='')
+        patch_query(monkeypatch, [entry])
+        update = MagicMock()
+        monkeypatch.setattr(api, 'update_page', update)
+        monkeypatch.setattr(
+            api,
+            '_get_page_by_id',
+            MagicMock(return_value={'id': 'entry-1'}),
+        )
+
+        response = client.post(
+            '/entry/entry-1/complete-step', headers=auth_header
+        )
+
+        assert response.status_code == 400
+        update.assert_not_called()
+
+    def test_missing_entry_is_a_404(
+        self,
+        client: FlaskClient,
+        auth_header: dict[str, str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(
+            api, '_get_page_by_id', MagicMock(return_value=None)
+        )
+
+        response = client.post(
+            '/entry/nope/complete-step', headers=auth_header
+        )
+
+        assert response.status_code == 404
+
+    def test_requires_auth(self, client: FlaskClient) -> None:
+        response = client.post('/entry/entry-1/complete-step')
+
+        assert response.status_code == 401
+
+
+# endregion
+
+
 # region /next-steps — the due-date escape hatch
 
 

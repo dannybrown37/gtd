@@ -93,7 +93,7 @@ There used to be a separate "Today" tab and "Next Steps" tab; they were merged (
 The Next Steps tab has two sections in the left list:
 
 1. **Weekly habit reminders** (top, always listed — done or not):
-   - `● Weekly Review` — `W` opens a guided 6-step flow via `WeeklyReviewScreen` modal. Steps: (1) Triage Inbox, (2) Review Projects, (3) Review Waiting For, (4) Review Someday/Maybe [uses `SomedayBrowseScreen`], (5) Review Areas of Focus, (6) Plan next week's priorities + Review Calendar [manual steps]. State persisted per-week in `weekly_habits.json` under `review_state`; resumes at first incomplete step.
+   - `● Weekly Review` — `W` opens a guided 7-step flow via `WeeklyReviewScreen` modal. **The steps themselves are `storage.REVIEW_STEPS`, not a list in this file or in `gtd_tui.py`** — `_GTD_REVIEW_STEPS` is an alias for it, and the HTTP API serves the same list to the webapp (`api.py` must not import Textual to learn it). Currently: (1) Process Inbox, (2) Review Projects, (3) Review Waiting For, (4) Review Someday/Maybe [uses `SomedayBrowseScreen`], (5) Review Horizons of Focus, (6) Review Calendar, (7) Plan Next Week's Priorities — the last two `manual`. State persisted per-week in `weekly_habits.json` under `review_state`; resumes at first incomplete step. **The webapp has this flow too** — see [Webapp](#webapp-srcgtdwebapp).
    - Pending: red `●` + `not done this week`. Done: green `●` + `last: <when>` (`_habit_last_done_str`). The row never disappears — `_mark_habit_done` flips it in place via `WeeklyHabitItem.refresh_label()`, and `W` stays available to re-run the review.
    - Uses `check_action` to show `W` only when habit item is focused
    - Completion stored in `~/.local/share/gtd/weekly_habits.json`; resets each Monday
@@ -311,8 +311,9 @@ feature added to either one belongs in the other **in the same change**.
 `tests/test_webapp_parity.py` enforces this, and is deliberately asymmetric because a
 symmetric check is worthless:
 
-- The **TUI side is derived** — it walks the real `BINDINGS` on `GTDApp` and the content
-  widgets, so a new binding is noticed with zero bookkeeping.
+- The **TUI side is derived** — it walks the real `BINDINGS` on `GTDApp`, the content
+  widgets **and the four Weekly Review screens**, so a new binding is noticed with zero
+  bookkeeping.
 - The **webapp side is declared** — the `CAPABILITIES` array at the top of `app.js`.
 
 So the failure that actually happens (add a TUI key, forget the webapp) fails CI. Two
@@ -321,8 +322,41 @@ hand-maintained lists compared to each other would drift together and always pas
 
 When you add a TUI binding, either implement it in the webapp and add its action name to
 `CAPABILITIES`, or add it to `TUI_ONLY` in the test **with a reason**. `TUI_ONLY` is for
-things that genuinely can't cross (keyboard navigation, `quit`) and for deliberately
-deferred scope — currently the Weekly Review, which the TUI has and the webapp does not.
+things that genuinely can't cross (keyboard navigation, `quit`, modal-internal
+`save`/`cancel`) — there is no longer any deferred scope in it.
+
+**A `TUI_ONLY` reason is load-bearing, so keep it true.** `complete_step` sat there
+labelled `'Weekly Review not yet ported'` and it is not a review action at all — it is
+`BaseEntryContent`'s `X`, which advances a numbered next-step list via
+`models.advance_steps`. The wrong reason hid a real per-entry gap behind an unrelated
+deferral for as long as the deferral lasted. It is now `POST /entry/<id>/complete-step`
+(the endpoint calls `advance_steps`, so the renumbering is not reimplemented in JS) plus
+a *Complete current step* row in the action sheet.
+
+**Weekly Review in the webapp** — a `review` view (`kind: 'review'`, `loadReview`) that is
+a checklist over `GET /review`, with the per-step work reusing the views and the action
+sheet the tabs already have. Four things about it are deliberate:
+
+- **The step list is never written in `app.js`.** It comes from `storage.REVIEW_STEPS`
+  through the endpoint, so the phone and the terminal cannot disagree about what the
+  review is. `tests/test_webapp_review.py` asserts no step label appears in the JS.
+- **The `/review` endpoints are local-state only and never touch Notion** — they read and
+  write the same `~/.local/share/gtd/weekly_habits.json` the TUI uses, so a tick made on
+  the phone shows up in the terminal, and a Notion outage can't take the checklist down.
+- **Changes apply immediately, not batched.** The TUI collects `_to_someday` /
+  `_status_changes` / `_to_drop` and applies them when the modal is dismissed; that works
+  because a modal *has* a dismissal. A webapp screen doesn't, and a backgrounded phone
+  would lose the batch.
+- **Drill-downs open the full entry action sheet** rather than mirroring each browse
+  screen's restricted key set. It's a superset of those keys, so `someday`, `drop` and
+  `change_status` are answered with no new per-step UI.
+
+Leaving a step and finishing a step stay distinct, the same split the TUI's two-line
+browse footer makes: the `‹` header returns without ticking, `✓ Done reviewing X` ticks.
+Ticking the last step fires `POST /review/complete`, which writes the same habit key the
+TUI's `W` does. The Next Steps view carries the matching always-present habit row
+(red `●` + "not done this week" / green `●` + last-done), and it's chrome — if `/review`
+fails the row is skipped rather than blanking the actionable list.
 
 **Areas of Focus in the webapp** — the Someday view has its own loader (`loadSomeday`,
 `kind: 'someday'`) rather than the generic `/entries` one, because it has to group by

@@ -14,6 +14,7 @@ const CAPABILITIES = [
   'drop_entry',
   'triage_entry',
   'triage_all',
+  'complete_step',
   'filter_context',
   'filter_list',
   'move_someday',
@@ -31,6 +32,18 @@ const CAPABILITIES = [
   'add_category',
   'remove_category',
   'rename_category',
+  // Weekly Review. `toggle` ticks or launches a step, `finish_step` is the
+  // "Done reviewing X" control each drill-down carries, `reset` un-ticks the
+  // week, and `complete_habit` is the Weekly Review row on Next Steps. The
+  // drill-downs reuse the entry action sheet, which is where `someday`,
+  // `drop` and `change_status` (Update a field → Status) are answered.
+  'toggle',
+  'finish_step',
+  'reset',
+  'complete_habit',
+  'someday',
+  'drop',
+  'change_status',
 ];
 
 // Chip value standing in for "entries with no Area at all"; the empty string
@@ -50,6 +63,7 @@ const VIEWS = {
   'recurring':   { label: 'Recurring',     kind: 'entries', status: 'Recurring' },
   'someday':     { label: 'Someday/Maybe', kind: 'someday',  status: 'Someday/Maybe' },
   'lists':       { label: 'Lists',         kind: 'lists' },
+  'review':      { label: 'Weekly Review', kind: 'review' },
 };
 
 const UPDATE_FIELDS = [
@@ -76,6 +90,10 @@ const state = {
   categories: [],
   schema: null,
   entries: [],
+  // The review checklist as `GET /review` last returned it, and which step
+  // is drilled into (null = the checklist itself).
+  review: null,
+  reviewStep: null,
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -260,6 +278,7 @@ function switchView(view) {
   state.currentContext = '';
   state.currentCategory = '';
   state.currentArea = '';
+  state.reviewStep = null;
   $('#view-title').textContent = VIEWS[view].label;
   const isCapture = VIEWS[view].kind === 'capture';
   $('#view-capture').classList.toggle('hidden', !isCapture);
@@ -450,6 +469,7 @@ function loadActiveView() {
   if (view.kind === 'inbox') return loadInbox();
   if (view.kind === 'lists') return loadLists();
   if (view.kind === 'someday') return loadSomeday();
+  if (view.kind === 'review') return loadReview();
   return loadEntries(view);
 }
 
@@ -490,9 +510,16 @@ async function loadNextSteps() {
       : '/next-steps';
     state.entries = await apiFetch(path);
     renderEntries(state.entries, { onTap: openActionSheet });
+    // The empty state describes the GTD entries only — the habit row below is
+    // always present, so "nothing actionable" would otherwise be a lie.
     setEmpty(state.entries.length ? '' : 'Nothing actionable 🎉');
   } catch (err) {
     reportError(err);
+  }
+  try {
+    prependReviewHabitRow(await apiFetch('/review'));
+  } catch (err) {
+    // The habit row is chrome; losing it must not blank the actionable list.
   }
 }
 
@@ -612,6 +639,7 @@ function openActionSheet(entry) {
     ${entry.next_step ? `<p class="entry-meta">${escapeHtml(entry.next_step)}</p>` : ''}
     <div class="action-stack">
       <button class="action-btn" data-act="update">Update a field</button>
+      ${entry.next_step ? '<button class="action-btn" data-act="complete-step">Complete current step</button>' : ''}
       <button class="action-btn" data-act="steps">Edit next step</button>
       <button class="action-btn" data-act="notes">Notes</button>
       <button class="action-btn" data-act="snooze">Snooze</button>
@@ -631,6 +659,7 @@ function openActionSheet(entry) {
     btn.addEventListener('click', () => {
       const act = btn.dataset.act;
       if (act === 'update') openUpdateFieldPicker(entry);
+      if (act === 'complete-step') completeCurrentStep(entry);
       if (act === 'steps') openStepsModal(entry);
       if (act === 'notes') openNotesModal(entry);
       if (act === 'snooze') openSnoozeModal(entry);
@@ -642,6 +671,23 @@ function openActionSheet(entry) {
       if (act === 'drop') confirmDrop(entry);
     });
   });
+}
+
+// The renumbering lives server-side in `notion/models.advance_steps`, the
+// same function the TUI's `X` calls — a second definition of "what a step
+// list is" written in JS is exactly the drift this repo keeps paying for.
+async function completeCurrentStep(entry) {
+  try {
+    const updated = await apiFetch(`/entry/${entry.page_id}/complete-step`, {
+      method: 'POST',
+    });
+    closeModal();
+    const left = (updated.next_step || '').trim();
+    showToast(left ? 'Step done ✓' : 'All steps complete ✓');
+    loadActiveView();
+  } catch (err) {
+    reportError(err);
+  }
 }
 
 async function patchEntry(entry, body, successMessage) {
@@ -1321,6 +1367,321 @@ async function saveTriage() {
   } catch (err) {
     reportError(err);
   }
+}
+
+// endregion
+
+// region Weekly review
+
+// A checklist over local state (`GET /review`) whose per-step work reuses the
+// views and the action sheet the tabs already have. Two things differ from the
+// TUI on purpose:
+//
+//  * The TUI collects each browse screen's changes and applies them when the
+//    modal is dismissed. A webapp screen has no dismissal, and a backgrounded
+//    phone would lose the batch, so every change here is applied immediately.
+//  * The drill-downs open the full action sheet rather than mirroring each
+//    browse screen's restricted key set. It is a superset of those keys, so
+//    the capability set matches with no new per-step UI.
+//
+// The step list itself is never written here — it comes from `storage.py`
+// via the endpoint, so the TUI and the webapp can't disagree about what the
+// review is.
+
+const REVIEW_STEP_STATUS = {
+  projects: 'Current Project',
+  waiting: 'Waiting For',
+  someday: 'Someday/Maybe',
+};
+
+async function loadReview() {
+  try {
+    state.review = await apiFetch('/review');
+  } catch (err) {
+    reportError(err);
+    return;
+  }
+  if (state.reviewStep === null) {
+    renderReviewChecklist();
+    return;
+  }
+  await renderReviewStep(state.review.steps[state.reviewStep]);
+}
+
+function renderReviewChecklist() {
+  const review = state.review;
+  const list = $('#entry-list');
+  list.innerHTML = '';
+  setEmpty('');
+  $('#view-title').textContent = VIEWS.review.label;
+
+  const total = review.steps.length;
+  const done = review.steps.filter((s) => s.done).length;
+
+  const header = document.createElement('li');
+  header.className = 'group-header';
+  header.innerHTML = `
+    <span class="group-label">Week of ${escapeHtml(formatDate(review.week_start))}</span>
+    <span class="group-count">${done}/${total}</span>
+    <button class="group-btn" data-act="reset" aria-label="Reset review progress">↺</button>
+  `;
+  header
+    .querySelector('[data-act="reset"]')
+    .addEventListener('click', confirmResetReview);
+  list.appendChild(header);
+
+  review.steps.forEach((step) => {
+    const li = document.createElement('li');
+    li.className = 'entry review-step' + (step.done ? ' done' : '');
+    const drillable = step.action !== 'manual' && !step.done;
+    li.innerHTML = `
+      <span class="review-tick">${step.done ? '✓' : '○'}</span>
+      <div class="entry-main">
+        <div class="entry-header">${escapeHtml(step.label)}</div>
+      </div>
+      ${drillable ? '<span class="chevron" aria-hidden="true">›</span>' : ''}
+    `;
+    li.addEventListener('click', () => onReviewStepTap(step));
+    list.appendChild(li);
+  });
+}
+
+// Mirrors the TUI's `action_toggle`: tapping a done step un-ticks it, a
+// manual step ticks straight away, and anything else opens its drill-down —
+// which is what ticks it, on the way out.
+async function onReviewStepTap(step) {
+  if (step.done) {
+    await setReviewStep(step.index, false);
+    return;
+  }
+  if (step.action === 'manual') {
+    await setReviewStep(step.index, true);
+    return;
+  }
+  state.reviewStep = step.index;
+  await renderReviewStep(step);
+}
+
+async function setReviewStep(index, done) {
+  try {
+    state.review = await apiFetch(`/review/step/${index}`, {
+      method: 'POST',
+      body: JSON.stringify({ done }),
+    });
+  } catch (err) {
+    reportError(err);
+    return;
+  }
+  await maybeCompleteReview();
+  if (state.reviewStep === null) renderReviewChecklist();
+}
+
+// Ticking the last step is what marks the review itself done for the week —
+// the same habit key the TUI writes, so the terminal agrees.
+async function maybeCompleteReview() {
+  if (!state.review.steps.every((s) => s.done)) return;
+  try {
+    state.review = await apiFetch('/review/complete', { method: 'POST' });
+    showToast('Weekly review complete 🎉');
+  } catch (err) {
+    reportError(err);
+  }
+}
+
+function confirmResetReview() {
+  openModal(`
+    <h2>Reset review progress?</h2>
+    <p class="entry-meta">Every step is un-ticked for this week.</p>
+    <div class="modal-actions">
+      <button class="secondary-btn" id="reset-cancel">Cancel</button>
+      <button class="primary-btn danger-action" id="reset-confirm">Reset</button>
+    </div>
+  `);
+  $('#reset-cancel').addEventListener('click', closeModal);
+  $('#reset-confirm').addEventListener('click', async () => {
+    try {
+      state.review = await apiFetch('/review/reset', { method: 'POST' });
+    } catch (err) {
+      reportError(err);
+      return;
+    }
+    closeModal();
+    showToast('Review progress reset');
+    renderReviewChecklist();
+  });
+}
+
+async function renderReviewStep(step) {
+  $('#view-title').textContent = step.label;
+  if (step.action === 'areas') return renderReviewAreas(step);
+  if (step.action === 'triage') return renderReviewTriage(step);
+  return renderReviewEntries(step);
+}
+
+// Every drill-down is bracketed the same way: a header that gets you back
+// without ticking, and an explicit "Done reviewing X" that does tick. The TUI
+// separates the same two scopes onto two footer lines.
+function appendReviewStepHeader(step, count) {
+  const li = document.createElement('li');
+  li.className = 'group-header';
+  li.innerHTML = `
+    <button class="group-btn" data-act="back" aria-label="Back to checklist">‹</button>
+    <span class="group-label">${escapeHtml(step.label)}</span>
+    <span class="group-count">${count}</span>
+  `;
+  li.querySelector('[data-act="back"]').addEventListener(
+    'click',
+    backToChecklist
+  );
+  $('#entry-list').appendChild(li);
+}
+
+function appendReviewStepDone(step) {
+  const li = document.createElement('li');
+  li.className = 'group-add';
+  li.innerHTML = `<button class="group-add-btn" type="button">✓ Done reviewing ${escapeHtml(step.label)}</button>`;
+  li.querySelector('button').addEventListener('click', () =>
+    finishReviewStep(step)
+  );
+  $('#entry-list').appendChild(li);
+}
+
+function backToChecklist() {
+  state.reviewStep = null;
+  renderReviewChecklist();
+}
+
+async function finishReviewStep(step) {
+  state.reviewStep = null;
+  await setReviewStep(step.index, true);
+}
+
+async function renderReviewEntries(step) {
+  const status = REVIEW_STEP_STATUS[step.action];
+  try {
+    state.entries = await apiFetch(
+      `/entries?status=${encodeURIComponent(status)}`
+    );
+  } catch (err) {
+    reportError(err);
+    return;
+  }
+  const list = $('#entry-list');
+  list.innerHTML = '';
+  appendReviewStepHeader(step, state.entries.length);
+  state.entries.forEach((entry) =>
+    list.appendChild(entryRow(entry, openActionSheet))
+  );
+  appendReviewStepDone(step);
+  setEmpty('');
+}
+
+async function renderReviewTriage(step) {
+  try {
+    state.entries = await apiFetch('/inbox');
+  } catch (err) {
+    reportError(err);
+    return;
+  }
+  const list = $('#entry-list');
+  list.innerHTML = '';
+  appendReviewStepHeader(step, state.entries.length);
+  state.entries.forEach((entry) =>
+    list.appendChild(entryRow(entry, openTriageModal))
+  );
+  appendReviewStepDone(step);
+  setEmpty(state.entries.length ? '' : 'Inbox is empty 🎉');
+}
+
+async function renderReviewAreas(step) {
+  let areas;
+  try {
+    ({ areas } = await apiFetch('/areas'));
+  } catch (err) {
+    reportError(err);
+    return;
+  }
+  const list = $('#entry-list');
+  list.innerHTML = '';
+  appendReviewStepHeader(step, areas.length);
+  areas.forEach((area) => {
+    const li = document.createElement('li');
+    li.className = 'entry';
+    li.innerHTML = `
+      <div class="entry-main">
+        <div class="entry-header">${escapeHtml(area)}</div>
+        <div class="entry-sub">Anything falling through the cracks?</div>
+      </div>
+      <span class="chevron" aria-hidden="true">›</span>
+    `;
+    li.addEventListener('click', () => openAreaCaptureModal(area));
+    list.appendChild(li);
+  });
+  appendReviewStepDone(step);
+  setEmpty(
+    areas.length ? '' : 'No horizons defined — add one from Someday/Maybe'
+  );
+}
+
+function openAreaCaptureModal(area) {
+  openModal(`
+    <h2>${escapeHtml(area)}</h2>
+    <p class="entry-meta">Anything here that isn't captured yet?</p>
+    <textarea id="area-capture" placeholder="What needs attention?"></textarea>
+    <div class="modal-actions">
+      <button class="secondary-btn" id="area-good">All good</button>
+      <button class="primary-btn" id="area-save">Capture</button>
+    </div>
+  `);
+  $('#area-capture').focus();
+  $('#area-good').addEventListener('click', closeModal);
+  $('#area-save').addEventListener('click', async () => {
+    const header = $('#area-capture').value.trim();
+    if (!header) return;
+    try {
+      await apiFetch('/capture', {
+        method: 'POST',
+        body: JSON.stringify({ header }),
+      });
+    } catch (err) {
+      reportError(err);
+      return;
+    }
+    closeModal();
+    showToast('Captured → Inbox');
+  });
+}
+
+// The TUI's Next Steps tab always carries a Weekly Review row, done or not,
+// so the review can't be forgotten. Same contract here — it is prepended to
+// the list rather than folded into it, and it never disappears.
+function habitLastDoneStr(iso) {
+  if (!iso) return 'never';
+  const days = Math.round(
+    (new Date(`${todayISO()}T00:00`) - new Date(`${iso}T00:00`)) / 86400000
+  );
+  if (days === 0) return 'today';
+  return `${formatDate(iso)} (${days}d ago)`;
+}
+
+function prependReviewHabitRow(review) {
+  const li = document.createElement('li');
+  li.className = 'entry habit-row';
+  const done = review.done_this_week;
+  const sub = done
+    ? `last: ${habitLastDoneStr(review.last_done)}`
+    : 'not done this week';
+  li.innerHTML = `
+    <div class="entry-main">
+      <div class="entry-header">
+        <span class="habit-dot${done ? ' done' : ''}">●</span> Weekly Review
+      </div>
+      <div class="entry-sub">${escapeHtml(sub)}</div>
+    </div>
+    <span class="chevron" aria-hidden="true">›</span>
+  `;
+  li.addEventListener('click', () => switchView('review'));
+  $('#entry-list').prepend(li);
 }
 
 // endregion

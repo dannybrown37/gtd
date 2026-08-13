@@ -214,6 +214,12 @@ There's no central server in the loop: you run this yourself, against your own
 Notion integration and database. Your GTD data lives in your Notion account under
 your own token.
 
+The same process also serves a browser UI (a PWA you can add to your home
+screen) covering the same ground as the TUI — every tab, the per-entry
+actions, and the guided **Weekly Review**. The review's ticks are stored
+locally alongside the TUI's, so a step you complete on the phone shows up in
+the terminal and vice versa.
+
 
 **Install**: `uv tool install "gtd-tui[api]"`
 **Run**: `gtd api` (default `0.0.0.0:8000`) or `gtd api --port 9000`
@@ -234,6 +240,7 @@ your own token.
 | `POST` | `/done/<page_id>` | Mark an entry done (archives the page). |
 | `GET` | `/entries` | List entries by status, backing the webapp's per-status tabs. |
 | `PATCH` | `/entry/<page_id>` | Update any subset of an entry's fields. Mirrors the TUI's `U`. |
+| `POST` | `/entry/<page_id>/complete-step` | Tick off the entry's current step, renumbering the rest. TUI's `X`. |
 | `GET` | `/entry/<page_id>/notes` | Read an entry's page body. Mirrors the TUI's `N`. |
 | `PUT` | `/entry/<page_id>/notes` | Replace an entry's page body. Body: {"notes": "..."}. |
 | `POST` | `/entry/<page_id>/snooze` | Push an entry's follow-up date out. Mirrors the TUI's `T`. |

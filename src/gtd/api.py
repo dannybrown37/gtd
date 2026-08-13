@@ -37,7 +37,7 @@ from gtd.notion.client import (
     archive_page,
 )
 from gtd import storage
-from gtd.notion.models import ProjectEntry
+from gtd.notion.models import ProjectEntry, advance_steps
 from gtd.notion.schema import STATUSES
 from gtd.notion.triage import TRIAGE_STATUSES
 from gtd.notion.views import (
@@ -515,6 +515,25 @@ def put_notes(page_id: str) -> Any:
     except (ValueError, RuntimeError, OSError) as err:
         return jsonify(error=f'Could not save notes: {err}'), 500
     return jsonify(saved=True), 200
+
+
+@app.post('/entry/<page_id>/complete-step')
+@require_auth
+def complete_step(page_id: str) -> Any:
+    """Tick off the entry's current step, renumbering the rest. TUI's `X`."""
+    page = _get_page_by_id(page_id)
+    if not page:
+        return jsonify(error=f'Entry {page_id} not found'), 404
+    entry = ProjectEntry.from_page(page)
+    if not entry.next_step.strip():
+        return jsonify(error='Entry has no step to complete'), 400
+
+    remaining = advance_steps(entry.next_step)
+    try:
+        update_page(page_id, build_property_update(next_step=remaining))
+    except (ValueError, RuntimeError, OSError) as err:
+        return jsonify(error=f'Could not complete step: {err}'), 500
+    return _entry_response(page_id)
 
 
 @app.post('/entry/<page_id>/snooze')

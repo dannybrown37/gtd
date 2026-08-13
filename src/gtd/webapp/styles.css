@@ -208,6 +208,35 @@ body {
   font-size: 0.9rem;
 }
 
+/* Weekly Review. The habit row and the checklist rows are `.entry`s so they
+   keep the same 44px touch target and spacing as everything else in the list;
+   only the leading marker differs. */
+.review-tick {
+  flex: none;
+  width: 1.2rem;
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 1rem;
+}
+
+.review-step.done .review-tick {
+  color: var(--accent);
+}
+
+.review-step.done .entry-header {
+  color: var(--text-dim);
+  font-weight: 500;
+}
+
+/* Red until the review is done for the week, green after — the TUI's `●`. */
+.habit-dot {
+  color: var(--danger);
+}
+
+.habit-dot.done {
+  color: var(--accent);
+}
+
 .chevron {
   flex: none;
   color: var(--text-dim);
