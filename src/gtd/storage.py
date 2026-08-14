@@ -36,6 +36,20 @@ REVIEW_STEPS: list[tuple[str, str]] = [
 ]
 
 
+def _write_habits(data: dict) -> None:
+    """Persist the habits file, creating its directory if it isn't there.
+
+    Nothing else creates `~/.local/share/gtd` — the config dir has its own
+    `mkdir`, this one had none. Every reader here falls back to a default when
+    the file is missing, so a host that has never run the TUI (an API-only
+    box) serves the whole weekly review read-only and then fails on the first
+    tick. Doing it here rather than at each call site keeps the next writer
+    from reintroducing it.
+    """
+    OUTPUT_PATH.mkdir(parents=True, exist_ok=True)
+    HABITS_PATH.write_text(json.dumps(data, indent=2) + '\n')
+
+
 def get_weekly_habit_date(key: str) -> str | None:
     """Return the ISO date this habit was last marked done, or None."""
     if not HABITS_PATH.exists():
@@ -49,7 +63,7 @@ def set_weekly_habit_date(key: str) -> None:
     if HABITS_PATH.exists():
         data = json.loads(HABITS_PATH.read_text())
     data[key] = datetime.now().date().isoformat()
-    HABITS_PATH.write_text(json.dumps(data, indent=2) + '\n')
+    _write_habits(data)
 
 
 def current_week_start() -> str:
@@ -86,7 +100,7 @@ def save_review_state(steps_done: list[bool]) -> None:
         'week_start': current_week_start(),
         'steps_done': steps_done,
     }
-    HABITS_PATH.write_text(json.dumps(data, indent=2) + '\n')
+    _write_habits(data)
 
 
 def set_review_step(index: int, *, done: bool) -> list[bool]:
@@ -111,4 +125,4 @@ def reset_review_state() -> None:
     data = json.loads(HABITS_PATH.read_text())
     data.pop('review_state', None)
     data.pop('weekly_review', None)
-    HABITS_PATH.write_text(json.dumps(data, indent=2) + '\n')
+    _write_habits(data)

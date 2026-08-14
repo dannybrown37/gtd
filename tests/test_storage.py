@@ -184,6 +184,42 @@ class TestReviewState:
         )
 
 
+# ── the data directory may not exist yet ────────────────────────────────────
+
+
+class TestMissingDataDirectory:
+    """Nothing else creates `~/.local/share/gtd`, so the writers must.
+
+    Every read here degrades to a default when the file is absent, so a host
+    that has never run the TUI serves `GET /review` perfectly and then 500s on
+    the first tick — which is how this shipped. The autouse fixture above
+    points at `tmp_path`, which always exists; these point one level deeper.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _unwritten_dir(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fresh = tmp_path / 'never-created' / 'gtd'
+        monkeypatch.setattr(storage, 'OUTPUT_PATH', fresh)
+        monkeypatch.setattr(
+            storage, 'HABITS_PATH', fresh / 'weekly_habits.json'
+        )
+
+    def test_set_review_step_creates_it(self) -> None:
+        assert set_review_step(0, done=True)[0] is True
+
+    def test_save_review_state_creates_it(self) -> None:
+        save_review_state([True, False])
+
+        assert load_review_state(2) == [True, False]
+
+    def test_set_weekly_habit_date_creates_it(self) -> None:
+        set_weekly_habit_date('weekly_review')
+
+        assert get_weekly_habit_date('weekly_review') is not None
+
+
 # ── current_week_start: drives the Monday reset ─────────────────────────────
 
 
