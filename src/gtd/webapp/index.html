@@ -15,7 +15,6 @@
 </head>
 <body>
 <header class="topbar">
-  <button id="nav-btn" class="icon-btn" aria-label="Menu">☰</button>
   <h1 id="view-title">Next Steps</h1>
   <button id="refresh-btn" class="icon-btn" aria-label="Refresh">↻</button>
   <button id="settings-btn" class="icon-btn" aria-label="Settings">⚙</button>
@@ -39,12 +38,21 @@
   </section>
 </main>
 
-<!-- Full-screen navigation. Eight tabs will not fit a bottom bar at a 44px
-     touch target, so view switching lives here instead. -->
-<nav id="nav-menu" class="nav-menu hidden" aria-label="Views">
-  <div id="nav-items"></div>
-  <p id="nav-version" class="nav-version"></p>
-</nav>
+<!-- View switching lives in the bottom-right thumb corner, not the topbar: this
+     is a phone app held one-handed, and the top-left is the furthest point from
+     the thumb. The button names the current view so it doubles as the "where am
+     I" indicator. -->
+<button id="nav-fab" class="nav-fab" aria-expanded="false" aria-controls="nav-sheet">
+  <span class="nav-fab-icon" aria-hidden="true">≡</span>
+  <span id="nav-fab-label" class="nav-fab-label">Next Steps</span>
+</button>
+
+<div id="nav-backdrop" class="nav-backdrop hidden">
+  <nav id="nav-sheet" class="nav-sheet" aria-label="Views">
+    <div id="nav-items"></div>
+    <p id="nav-version" class="nav-version"></p>
+  </nav>
+</div>
 
 <div id="modal-backdrop" class="modal-backdrop hidden">
   <div id="modal" class="modal"></div>

@@ -381,8 +381,26 @@ an `+ Add to <category>` row and a trailing `+ New category` row — the TUI's `
 
 Webapp structure: `VIEWS` in `app.js` maps one entry per TUI tab; a single generic list
 view renders them all, backed by `GET /entries?status=…`. Per-entry actions live in an
-action sheet (`openActionSheet`) rather than a keymap. Navigation is a full-screen
-hamburger menu — eight tabs can't hold a 44px touch target in a bottom bar.
+action sheet (`openActionSheet`) rather than a keymap.
+
+**Navigation is a thumb-corner FAB, not a topbar hamburger.** The webapp is *for the
+phone* — the TUI is the computer front end — so the trigger lives bottom-right, the
+one corner a one-handed grip actually reaches, and it names the current view so it
+doubles as the "where am I" indicator. It opens `#nav-sheet`, a bottom sheet sharing
+`.modal`'s shape because it rises to meet the same thumb; ten views can't hold a 44px
+touch target in a persistent bottom bar, which is why the list is a sheet and not a
+tab strip. Three things are deliberate:
+
+- **`buildNavMenu` renders `Object.entries(VIEWS).reverse()`** so the head of `VIEWS`
+  (Next Steps, Inbox) lands *nearest the bottom*, closest to the thumb. Insertion
+  order would put the rarest views there. Don't "tidy" the `.reverse()` away.
+- **`switchView` sets both `#view-title` and `#nav-fab-label`, but the Weekly Review
+  drill-down sets only the title** — the title is a breadcrumb (it becomes the step
+  label), the FAB always names the view.
+- **`#views` pads its bottom by `--fab-clearance`**, because the FAB is fixed-position
+  and floats over the list. The last row on Someday, Lists and the Review is an
+  interactive one (`+ New area`, `✓ Done reviewing …`) and would otherwise sit under
+  it. `tests/test_webapp_layout.py` guards this and the sheet's `dvh` cap.
 
 **Packaging gotcha**: `webapp/`'s files are non-`.py` static assets, so `[tool.setuptools.packages.find]`
 in `pyproject.toml` alone does *not* bundle them into the built wheel — that only governs which

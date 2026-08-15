@@ -93,3 +93,32 @@ def test_safe_area_inset_is_applied_once_at_the_bottom(styles: str) -> None:
 def test_viewport_meta_covers_the_notch(index_html: str) -> None:
     """`viewport-fit=cover` is what makes safe-area env() vars meaningful."""
     assert 'viewport-fit=cover' in index_html
+
+
+def test_views_reserves_clearance_for_the_nav_fab(styles: str) -> None:
+    """The nav FAB floats over `#views`, so the list must pad out from it.
+
+    The last row of Someday, Lists and the Weekly Review is interactive
+    (`+ New area`, `+ New category`, `✓ Done reviewing …`). Without reserved
+    clearance the FAB sits on top of the one control the user scrolled down to
+    reach.
+    """
+    views = _rule(styles, '#views')
+    assert '--fab-clearance' in views, (
+        '#views must reserve --fab-clearance at the bottom for the nav FAB'
+    )
+
+
+def test_nav_sheet_uses_dynamic_viewport_units(styles: str) -> None:
+    """The nav sheet is capped like the action sheet, and for the same reason.
+
+    A `vh` declaration may remain as a fallback, but only *before* the `dvh`
+    one — later declarations win, so the reverse order silently disables it.
+    """
+    sheet = _rule(styles, '.nav-sheet')
+    assert sheet, '.nav-sheet rule is missing'
+    assert 'dvh' in sheet, 'nav sheet max-height must use dvh'
+    if 'max-height: 85vh' in sheet:
+        assert sheet.index('max-height: 85vh') < sheet.index(
+            'max-height: 85dvh'
+        ), 'the vh fallback must come first or it overrides dvh'

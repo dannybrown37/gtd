@@ -99,7 +99,9 @@ const state = {
 const $ = (sel) => document.querySelector(sel);
 const modalBackdrop = $('#modal-backdrop');
 const modal = $('#modal');
-const navMenu = $('#nav-menu');
+const navBackdrop = $('#nav-backdrop');
+const navSheet = $('#nav-sheet');
+const navFab = $('#nav-fab');
 
 function showToast(message, isError) {
   const el = document.createElement('div');
@@ -243,14 +245,23 @@ async function showNavVersion() {
   slot.textContent = cachedVersion ? `v${cachedVersion}` : '';
 }
 
+// Rendered bottom-up: the sheet rises from the thumb, so the views reached most
+// often (Next Steps, Inbox — the head of VIEWS) must land nearest the bottom.
+// Do not "tidy" this back to insertion order.
 function buildNavMenu() {
   $('#nav-items').innerHTML = Object.entries(VIEWS)
+    .reverse()
     .map(([id, v]) => {
-      const active = id === state.activeView ? ' active' : '';
-      return `<button class="nav-item${active}" data-view="${id}">${escapeHtml(v.label)}</button>`;
+      const active = id === state.activeView;
+      return (
+        `<button class="nav-item${active ? ' active' : ''}" data-view="${id}"` +
+        `${active ? ' aria-current="page"' : ''}>` +
+        `<span>${escapeHtml(v.label)}</span>` +
+        `<span aria-hidden="true">${active ? '✓' : ''}</span></button>`
+      );
     })
     .join('');
-  navMenu.querySelectorAll('.nav-item').forEach((btn) => {
+  navSheet.querySelectorAll('.nav-item').forEach((btn) => {
     btn.addEventListener('click', () => {
       closeNav();
       switchView(btn.dataset.view);
@@ -260,17 +271,31 @@ function buildNavMenu() {
 
 function openNav() {
   buildNavMenu();
-  navMenu.classList.remove('hidden');
+  navBackdrop.classList.remove('hidden');
+  navFab.setAttribute('aria-expanded', 'true');
   showNavVersion();
+  (navSheet.querySelector('.nav-item.active') || navSheet.querySelector('.nav-item'))?.focus();
 }
 
 function closeNav() {
-  navMenu.classList.add('hidden');
+  if (navBackdrop.classList.contains('hidden')) return;
+  navBackdrop.classList.add('hidden');
+  navFab.setAttribute('aria-expanded', 'false');
+  navFab.focus();
 }
 
-$('#nav-btn').addEventListener('click', () => {
-  if (navMenu.classList.contains('hidden')) openNav();
+navFab.addEventListener('click', () => {
+  if (navBackdrop.classList.contains('hidden')) openNav();
   else closeNav();
+});
+
+// Tapping the scrim, but not the sheet itself, dismisses.
+navBackdrop.addEventListener('click', (e) => {
+  if (e.target === navBackdrop) closeNav();
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeNav();
 });
 
 function switchView(view) {
@@ -280,10 +305,32 @@ function switchView(view) {
   state.currentArea = '';
   state.reviewStep = null;
   $('#view-title').textContent = VIEWS[view].label;
+  // The title doubles as a breadcrumb inside the Weekly Review; the FAB always
+  // names the view, so it is deliberately not updated by the review drill-down.
+  $('#nav-fab-label').textContent = VIEWS[view].label;
   const isCapture = VIEWS[view].kind === 'capture';
   $('#view-capture').classList.toggle('hidden', !isCapture);
   $('#view-list').classList.toggle('hidden', isCapture);
   loadActiveView();
+}
+
+// Scrolling down is reading, so the FAB gets out of the way; scrolling up or
+// pausing brings it back. Skipped entirely for anyone who opted out of motion.
+if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+  const views = $('#views');
+  let lastScroll = 0;
+  let idleTimer = null;
+  views.addEventListener(
+    'scroll',
+    () => {
+      const y = views.scrollTop;
+      navFab.classList.toggle('tucked', y > lastScroll && y > 24);
+      lastScroll = y;
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => navFab.classList.remove('tucked'), 500);
+    },
+    { passive: true },
+  );
 }
 
 // endregion
