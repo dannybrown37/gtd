@@ -37,6 +37,7 @@ from gtd.notion.client import (
     archive_page,
 )
 from gtd import storage
+from gtd.notion.log import _is_recurring
 from gtd.notion.models import ProjectEntry, advance_steps
 from gtd.notion.schema import STATUSES
 from gtd.notion.triage import TRIAGE_STATUSES
@@ -64,6 +65,12 @@ EXCLUDE_THESE = [  # attributes not currently ever needed in iOS Shortcuts
     'success_condition',
     'updated_date',
 ]
+
+# Next Steps is a mixed-status view — a Recurring item and a Current Project
+# sit side by side — so the client has to be told which it is or it can't
+# offer the reschedule choice. `/done` refuses to archive a recurring item
+# regardless, but without this the webapp only finds that out the hard way.
+_NEXT_STEPS_EXCLUDES = [f for f in EXCLUDE_THESE if f != 'status']
 
 app = Flask(__name__)
 
@@ -146,6 +153,14 @@ def _get_page_by_id(page_id: str) -> dict | None:
     except Exception:
         print(f'Failed to retrieve page {page_id}, response: {response.text}')
     return None
+
+
+def _page_entry(page: dict) -> ProjectEntry | None:
+    """A raw Notion page as a ProjectEntry, or None if it isn't shaped so."""
+    try:
+        return ProjectEntry.from_page(page)
+    except (KeyError, TypeError):
+        return None
 
 
 def _entry_response(page_id: str) -> tuple[Any, int]:
@@ -639,7 +654,7 @@ def next_steps() -> Any:
             e.due_date or '9999-99-99',
         ),
     )
-    return jsonify([_entry_dict(e, EXCLUDE_THESE) for e in entries])
+    return jsonify([_entry_dict(e, _NEXT_STEPS_EXCLUDES) for e in entries])
 
 
 @app.get('/triage-schema')
@@ -840,6 +855,35 @@ def get_list(category: str) -> Any:
     return jsonify([_entry_dict(e, extra_excludes) for e in entries])
 
 
+def _reschedule(page_id: str, raw_date: str) -> tuple[Response, int]:
+    """Push a recurring item's next follow-up out instead of archiving it."""
+    target = _parse_iso_date(raw_date)
+    if not target:
+        return jsonify(error=f'Unparseable date: {raw_date}'), 400
+    try:
+        update_page(page_id, build_property_update(follow_up_date=target))
+    except (ValueError, RuntimeError, OSError) as err:
+        return jsonify(error=f'Reschedule failed: {err}'), 500
+    return jsonify(rescheduled=target), 200
+
+
+def _recurring_refusal(
+    page_id: str, page_data: dict, body: dict
+) -> tuple[Response, int] | None:
+    """409 if archiving this page would silently destroy a recurring item."""
+    if body.get('confirm_recurring'):
+        return None
+    entry = _page_entry(page_data)
+    if not entry or not _is_recurring(entry):
+        return None
+    return jsonify(
+        error=f'"{entry.header.strip()}" is recurring',
+        recurring=True,
+        header=entry.header,
+        page_id=page_id,
+    ), 409
+
+
 @app.post('/done/<page_id>')
 @require_auth
 def done(page_id: str) -> Any:
@@ -847,6 +891,12 @@ def done(page_id: str) -> Any:
 
     Body may carry `reschedule` (an ISO date), which sets the next follow-up
     instead of archiving — how a Recurring item is completed without losing it.
+
+    A recurring entry is refused (409) unless the caller either reschedules it
+    or passes `confirm_recurring`. The TUI asks *Reschedule vs Permanently
+    complete* before archiving; enforcing that here rather than in the client
+    means no caller can skip it — the webapp's own action sheet did, because
+    `/next-steps` doesn't send `status` and it had nothing to branch on.
     """
     page_data = _get_page_by_id(page_id)
     if not page_data:
@@ -854,16 +904,11 @@ def done(page_id: str) -> Any:
 
     body = request.get_json(force=True, silent=True) or {}
     if body.get('reschedule'):
-        target = _parse_iso_date(str(body['reschedule']))
-        if not target:
-            return jsonify(
-                error=f'Unparseable date: {body["reschedule"]}',
-            ), 400
-        try:
-            update_page(page_id, build_property_update(follow_up_date=target))
-        except (ValueError, RuntimeError, OSError) as err:
-            return jsonify(error=f'Reschedule failed: {err}'), 500
-        return jsonify(rescheduled=target), 200
+        return _reschedule(page_id, str(body['reschedule']))
+
+    refusal = _recurring_refusal(page_id, page_data, body)
+    if refusal:
+        return refusal
 
     try:
         archive_page(page_id)

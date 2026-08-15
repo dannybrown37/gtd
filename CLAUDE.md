@@ -333,6 +333,25 @@ deferral for as long as the deferral lasted. It is now `POST /entry/<id>/complet
 (the endpoint calls `advance_steps`, so the renumbering is not reimplemented in JS) plus
 a *Complete current step* row in the action sheet.
 
+**"Done" on a recurring item is refused server-side.** The TUI asks *Reschedule vs
+Permanently complete* before `action_mark_done` archives. The webapp asked the same
+question, but only when `entry.status === 'Recurring'` — and `GET /next-steps` strips
+`status` out of its payload via `EXCLUDE_THESE`, which is precisely the view a due
+recurring item appears on. So the home view offered a plain "Done" and archived the
+item outright. Same shape as the Waiting For tickler: parity restored by a rule at the
+**write chokepoint**, not a fix in the one client that got caught.
+
+- `POST /done/<id>` 409s with `{recurring: true, header}` unless the body carries
+  `reschedule` (a date) or `confirm_recurring` (the *Permanently complete* branch). The
+  test is `notion/log.py`'s `_is_recurring`, the same one the TUI calls — so a cadence
+  header (`Daily:`, `2x/week:`) is caught even when the Status was never set.
+- `markDone(entry, {force})` in `app.js` turns that 409 into `openRescheduleModal`
+  rather than an error toast, so the sheet recovers the choice on any view.
+- `/next-steps` now keeps `status` (`_NEXT_STEPS_EXCLUDES`) so the sheet can *label* it
+  "Done (reschedule)" up front. That's the affordance; the 409 is the guarantee.
+
+`tests/test_recurring_done.py` covers both halves.
+
 **Weekly Review in the webapp** — a `review` view (`kind: 'review'`, `loadReview`) that is
 a checklist over `GET /review`, with the per-step work reusing the views and the action
 sheet the tabs already have. Four things about it are deliberate:

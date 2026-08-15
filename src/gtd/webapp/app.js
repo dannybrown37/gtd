@@ -179,7 +179,12 @@ async function apiFetch(path, options = {}) {
     throw new Error('unauthorized');
   }
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+  if (!res.ok) {
+    const err = new Error(data.error || `Request failed (${res.status})`);
+    err.status = res.status;
+    err.data = data;
+    throw err;
+  }
   return data;
 }
 
@@ -1222,16 +1227,29 @@ function openRescheduleModal(entry) {
     btn.addEventListener('click', () => send(addDaysISO(Number(btn.dataset.days))));
   });
   $('#resched-save').addEventListener('click', () => send($('#resched-date').value));
-  $('#resched-complete').addEventListener('click', () => markDone(entry));
+  $('#resched-complete').addEventListener('click', () =>
+    markDone(entry, { force: true })
+  );
 }
 
-async function markDone(entry) {
+// `force` is the webapp's half of the TUI's *Permanently complete* branch.
+// Without it the server refuses (409) to archive a recurring item, which is
+// the backstop for views like Next Steps where the row's status may not even
+// have reached the client.
+async function markDone(entry, { force = false } = {}) {
   try {
-    await apiFetch(`/done/${entry.page_id}`, { method: 'POST' });
+    await apiFetch(`/done/${entry.page_id}`, {
+      method: 'POST',
+      body: JSON.stringify({ confirm_recurring: force }),
+    });
     closeModal();
     removeEntryRow(entry.page_id);
     showToast('Done ✓');
   } catch (err) {
+    if (err.data && err.data.recurring) {
+      openRescheduleModal(entry);
+      return;
+    }
     reportError(err);
   }
 }
