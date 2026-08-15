@@ -153,6 +153,14 @@ function todayISO() {
   return localISO(new Date());
 }
 
+// Locked to the *following* Monday: on a Monday this is a week out, not today.
+// A snooze that resolves to today is a no-op that leaves the item on Next Steps.
+function nextMondayISO(from = new Date()) {
+  const d = new Date(from);
+  d.setDate(d.getDate() + ((8 - d.getDay()) % 7 || 7));
+  return localISO(d);
+}
+
 function addDaysISO(days) {
   const d = new Date();
   d.setDate(d.getDate() + days);
@@ -883,6 +891,7 @@ function openSnoozeModal(entry) {
     <div class="action-stack">
       <button class="action-btn" data-days="1">Tomorrow</button>
       <button class="action-btn" data-days="3">In 3 days</button>
+      <button class="action-btn" data-date="${nextMondayISO()}">Next Monday</button>
       <button class="action-btn" data-days="7">Next week</button>
     </div>
     <label for="snooze-date">Or pick a date</label>
@@ -908,6 +917,9 @@ function openSnoozeModal(entry) {
   };
   modal.querySelectorAll('[data-days]').forEach((btn) => {
     btn.addEventListener('click', () => send({ days: Number(btn.dataset.days) }));
+  });
+  modal.querySelectorAll('.action-btn[data-date]').forEach((btn) => {
+    btn.addEventListener('click', () => send({ date: btn.dataset.date }));
   });
   $('#snooze-save').addEventListener('click', () => send({ date: $('#snooze-date').value }));
 }
