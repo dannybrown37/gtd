@@ -15,6 +15,7 @@ repos:
       - id: pytest
         args: ['--runner=uv run --extra api pytest', tests/, -q]
       - id: block-private-terms
+      - id: mypy
 
   - repo: https://github.com/commitizen-tools/commitizen
     rev: v4.16.5
