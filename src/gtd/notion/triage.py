@@ -39,6 +39,7 @@ def _process_single_entry(entry: ProjectEntry) -> bool:  # noqa: C901, PLR0911, 
     agenda_person = agenda_person_from_header(entry.header)
 
     # Status -- agenda items are always Current Project, so don't ask.
+    status: str | None
     if agenda_person:
         status = AGENDA_STATUS
     else:

@@ -3,6 +3,7 @@
 import os
 import sys
 from http import HTTPStatus
+from typing import Any
 
 import httpx
 
@@ -117,20 +118,24 @@ def _headers() -> dict[str, str]:
 
 _TIMEOUT = httpx.Timeout(30.0)
 
+# ANN401: these four forward whatever httpx accepts (json=, params=,
+# content=...). Naming a narrower type here would mean restating httpx's
+# own overloads and keeping them in step with its releases.
 
-def _get(url: str, **kw: object) -> httpx.Response:
+
+def _get(url: str, **kw: Any) -> httpx.Response:  # noqa: ANN401
     return httpx.get(url, headers=_headers(), timeout=_TIMEOUT, **kw)
 
 
-def _post(url: str, **kw: object) -> httpx.Response:
+def _post(url: str, **kw: Any) -> httpx.Response:  # noqa: ANN401
     return httpx.post(url, headers=_headers(), timeout=_TIMEOUT, **kw)
 
 
-def _patch(url: str, **kw: object) -> httpx.Response:
+def _patch(url: str, **kw: Any) -> httpx.Response:  # noqa: ANN401
     return httpx.patch(url, headers=_headers(), timeout=_TIMEOUT, **kw)
 
 
-def _delete(url: str, **kw: object) -> httpx.Response:
+def _delete(url: str, **kw: Any) -> httpx.Response:  # noqa: ANN401
     return httpx.delete(url, headers=_headers(), timeout=_TIMEOUT, **kw)
 
 

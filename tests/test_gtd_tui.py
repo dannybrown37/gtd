@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 from textual.app import App, ComposeResult
-from textual.binding import Binding
+from textual.binding import Binding, BindingType
 from textual.screen import ModalScreen
 from textual.widgets import (
     Label,
@@ -240,14 +240,13 @@ class TestClassifyNetworkError:
         assert severity == 'error'
         assert msg
 
-    def test_unrelated_exception_returns_empty(self):
-        msg, severity = _classify_network_error(ValueError('something else'))
-        assert msg == ''
-        assert severity == ''
+    def test_unrelated_exception_returns_the_reraise_sentinel(self):
+        # None, not ('', ''): an empty severity was never a severity, and
+        # `notify` takes a Literal that has no empty member.
+        assert _classify_network_error(ValueError('something else')) is None
 
     def test_non_network_does_not_swallow(self):
-        msg, _ = _classify_network_error(RuntimeError('boom'))
-        assert msg == ''
+        assert _classify_network_error(RuntimeError('boom')) is None
 
 
 class TestOpenStepsEditor:
@@ -905,7 +904,7 @@ class TestQuitIsNotPriority:
     class _AppHost(App):
         """Stand-in for GTDApp: same keys, no Notion."""
 
-        BINDINGS: ClassVar[list[Binding]] = list(GTDApp.BINDINGS)
+        BINDINGS: ClassVar[list[BindingType]] = list(GTDApp.BINDINGS)
         quits: ClassVar[list[bool]] = []
 
         def compose(self) -> ComposeResult:
@@ -1048,7 +1047,7 @@ class TestStepFanfare:
                             if not s['done']
                         )
                     )
-                    screen.action_toggle()
+                    screen.action_toggle_step()
                     for _ in range(6):
                         await pilot.pause()
                     cel = app.screen

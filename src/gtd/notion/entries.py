@@ -7,6 +7,7 @@ import sys
 import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 from dateutil import parser as dateparser
 
@@ -382,7 +383,7 @@ def list_entries(
             }
         )
 
-    filter_obj = None
+    filter_obj: dict[str, Any] | None = None
     if len(filter_conditions) == 1:
         filter_obj = filter_conditions[0]
     elif len(filter_conditions) > 1:

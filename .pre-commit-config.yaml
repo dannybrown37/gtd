@@ -6,7 +6,7 @@ repos:
   # test hook, by recovering it from git's argv -- the commitizen hook below
   # runs in a separate git invocation and can only ever fail after the suite.
   - repo: https://github.com/dannybrown37/git-a-grip
-    rev: v0.11.0
+    rev: v0.11.1
     hooks:
       - id: commitizen-early
         fail_fast: true
@@ -15,7 +15,11 @@ repos:
       - id: pytest
         args: ['--runner=uv run --extra api pytest', tests/, -q]
       - id: block-private-terms
+      # The runner installs mypy itself; the stub package is the one thing
+      # `--with mypy` cannot know it needs.
       - id: mypy
+        args:
+          - '--runner=uv run --with mypy --with types-python-dateutil mypy'
 
   - repo: https://github.com/commitizen-tools/commitizen
     rev: v4.16.5

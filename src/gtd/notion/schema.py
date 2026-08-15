@@ -92,7 +92,9 @@ def is_agenda_context(context: str | None) -> bool:
     people: `@Sam` means "next time I'm talking to Sam". Agenda items are
     complete with just a context and a date -- see `drop_triaged_agenda_items`.
     """
-    return bool(context) and context.startswith(AGENDA_CONTEXT_PREFIX)
+    if not context:
+        return False
+    return context.startswith(AGENDA_CONTEXT_PREFIX)
 
 
 def agenda_person_from_header(header: str | None) -> str | None:

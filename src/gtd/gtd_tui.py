@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
 import os
 import random
 import re
@@ -12,7 +13,7 @@ import tempfile
 from datetime import datetime, timedelta
 from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, ClassVar, Literal, Protocol, TypeVar
 
 if TYPE_CHECKING:
     from textual.events import Key
@@ -22,10 +23,11 @@ if TYPE_CHECKING:
 
 from textual import on, work
 from textual.app import App, ComposeResult
-from textual.binding import Binding
+from textual.binding import Binding, BindingType
 from textual.command import Hit, Hits, Provider
 from textual.containers import ScrollableContainer, Vertical
 from textual.screen import ModalScreen
+from textual.widget import Widget
 from textual.widgets import (
     Footer,
     Header,
@@ -386,7 +388,7 @@ class CelebrationScreen(ModalScreen):
     }
     """
 
-    BINDINGS: ClassVar[list[Binding]] = [
+    BINDINGS: ClassVar[list[BindingType]] = [
         Binding('escape,enter,space', 'dismiss_cel', show=False),
     ]
 
@@ -620,7 +622,7 @@ async def _prompt_and_get_props(
 async def _shared_update_entry(
     app: App,
     entry: ProjectEntry,
-    refresh_cb: Callable[[], None],
+    refresh_cb: Callable[[], object],
 ) -> dict | None:
     """Update entry fields — shared across tab widgets.
 
@@ -678,7 +680,31 @@ def _apply_props(entry: ProjectEntry, props: dict) -> None:
             setattr(entry, field, value)
 
 
-async def _browse_update_entry(screen: ModalScreen, list_id: str) -> None:
+_WidgetT = TypeVar('_WidgetT', bound=Widget)
+
+
+class _BrowseScreen(Protocol):
+    """What `_browse_update_entry` needs of a review browse screen.
+
+    The browse screens share no base beyond ModalScreen, so this names
+    the two members the helper reaches for rather than widening them.
+    """
+
+    app: App
+
+    def _current_entry(self) -> ProjectEntry | None: ...
+
+    def query_one(
+        self,
+        selector: str,
+        expect_type: type[_WidgetT],
+    ) -> _WidgetT: ...
+
+
+async def _browse_update_entry(
+    screen: _BrowseScreen,
+    list_id: str,
+) -> None:
     """Update the highlighted entry from a Weekly Review browse screen.
 
     Writes straight to Notion (the review screens' other actions queue their
@@ -731,7 +757,7 @@ async def _open_steps_editor(app: App, initial_text: str = '') -> str:
 class EditNotesModal(ModalScreen[str | None]):
     """In-TUI notes editor — no terminal takeover."""
 
-    BINDINGS: ClassVar[list[Binding]] = [
+    BINDINGS: ClassVar[list[BindingType]] = [
         Binding('ctrl+s', 'save', 'Save'),
         Binding('escape', 'cancel', 'Cancel'),
     ]
@@ -894,7 +920,7 @@ class BaseEntryContent(Vertical):
     VIEW_STATUS: ClassVar[str | list[str]] = ''
     VIEW_FOLLOW_UP: ClassVar[str | None] = None
 
-    BINDINGS: ClassVar[list[Binding]] = [
+    BINDINGS: ClassVar[list[BindingType]] = [
         Binding('X', 'complete_step', 'Complete Step', show=True),
     ]
 
@@ -956,13 +982,13 @@ class BaseEntryContent(Vertical):
     def _load_entries(self) -> None:
         try:
             entries = self._fetch()
-            self.app.call_from_thread(self._set_entries, entries)
+            self.app.call_from_thread(self._set_entries, entries)  # type: ignore[arg-type]
         except Exception as e:
             msg = f'Notion error: {e}'
             self.app.call_from_thread(
                 lambda: self.app.notify(msg, severity='error')
             )
-            self.app.call_from_thread(self._set_entries, [])
+            self.app.call_from_thread(self._set_entries, [])  # type: ignore[arg-type]
 
     async def _set_entries(self, entries: list[ProjectEntry]) -> None:
         self._entries = entries
@@ -1269,6 +1295,7 @@ class BaseEntryContent(Vertical):
         title = entry.header.strip()
         kwargs: dict = {}
 
+        status: str | None
         needs_status = not entry.status or entry.status == 'Triage'
         agenda_person = agenda_person_from_header(entry.header)
 
@@ -1593,7 +1620,7 @@ class ProjectsBrowseScreen(ModalScreen):
     # Item keys are capitals, mirroring the main app: lowercase keys are
     # navigation/global (h/j/k/l/q), so an accidental one never fires an
     # action here.
-    BINDINGS: ClassVar[list[Binding]] = [
+    BINDINGS: ClassVar[list[BindingType]] = [
         Binding('escape', 'finish_step', 'Finish step', show=True),
         Binding('q', 'finish_step', show=False),
         Binding('U', 'update_entry', 'Update project', show=True),
@@ -1785,7 +1812,7 @@ class WaitingForBrowseScreen(ModalScreen):
     WaitingForBrowseScreen .sb-footer-exit { margin-top: 0; }
     """
 
-    BINDINGS: ClassVar[list[Binding]] = [
+    BINDINGS: ClassVar[list[BindingType]] = [
         Binding('escape', 'finish_step', 'Finish step', show=True),
         Binding('q', 'finish_step', show=False),
         Binding('U', 'update_entry', 'Update project', show=True),
@@ -1980,7 +2007,7 @@ class SomedayBrowseScreen(ModalScreen):
     SomedayBrowseScreen .sb-footer-exit { margin-top: 0; }
     """
 
-    BINDINGS: ClassVar[list[Binding]] = [
+    BINDINGS: ClassVar[list[BindingType]] = [
         Binding('escape', 'finish_step', 'Finish step', show=True),
         Binding('q', 'finish_step', show=False),
         Binding('A', 'activate', 'Activate', show=True),
@@ -2155,12 +2182,12 @@ class WeeklyReviewScreen(ModalScreen[bool]):
     }
     """
 
-    BINDINGS: ClassVar[list[Binding]] = [
+    BINDINGS: ClassVar[list[BindingType]] = [
         Binding('escape', 'cancel', 'Close review'),
         # q mirrors escape here rather than quitting the app — muscle memory
         # from the main app used to kill the whole session mid-review.
         Binding('q', 'cancel', show=False),
-        Binding('enter,space', 'toggle', 'Check/Launch', show=True),
+        Binding('enter,space', 'toggle_step', 'Check/Launch', show=True),
         Binding('X', 'reset', 'Reset', show=True),
         Binding('j', 'cursor_down', show=False),
         Binding('k', 'cursor_up', show=False),
@@ -2319,7 +2346,7 @@ class WeeklyReviewScreen(ModalScreen[bool]):
         )
 
     @work
-    async def action_toggle(self) -> None:
+    async def action_toggle_step(self) -> None:
         step = self._steps[self._focused]
         if step['done']:
             step['done'] = False
@@ -2367,7 +2394,7 @@ class NextStepsContent(BaseEntryContent):
     TITLE: ClassVar[str] = 'Next Steps'
     EMPTY_MSG: ClassVar[str] = 'All clear. Nice work.'
 
-    BINDINGS: ClassVar[list[Binding]] = [
+    BINDINGS: ClassVar[list[BindingType]] = [
         Binding('W', 'complete_habit', 'Complete'),
         Binding('T', 'wait_tomorrow', 'Tomorrow'),
         Binding('S', 'edit_steps', 'Steps'),
@@ -2680,7 +2707,7 @@ class NextStepsContent(BaseEntryContent):
             return
 
         loop = asyncio.get_running_loop()
-        context = entry.context
+        context: str | None = entry.context
         if not context:
             contexts = await loop.run_in_executor(
                 None, get_select_options, 'Context'
@@ -2730,7 +2757,7 @@ class InboxContent(BaseEntryContent):
     TITLE: ClassVar[str] = 'Inbox'
     EMPTY_MSG: ClassVar[str] = 'Inbox zero! 🎉'
 
-    BINDINGS: ClassVar[list[Binding]] = [
+    BINDINGS: ClassVar[list[BindingType]] = [
         Binding('T', 'triage_entry', 'Triage'),
         Binding('A', 'triage_all', 'Triage All'),
         Binding('U', 'update_entry', 'Update'),
@@ -2814,7 +2841,7 @@ class InboxContent(BaseEntryContent):
             return
 
         loop = asyncio.get_running_loop()
-        context = entry.context
+        context: str | None = entry.context
         if not context:
             contexts = await loop.run_in_executor(
                 None, get_select_options, 'Context'
@@ -2868,7 +2895,7 @@ class ProjectsContent(BaseEntryContent):
     ]
     EMPTY_MSG: ClassVar[str] = 'No active projects.'
 
-    BINDINGS: ClassVar[list[Binding]] = [
+    BINDINGS: ClassVar[list[BindingType]] = [
         Binding('U', 'update_entry', 'Update'),
         Binding('S', 'edit_steps', 'Steps'),
         Binding('N', 'edit_notes', 'Notes'),
@@ -2931,7 +2958,7 @@ class RecurringContent(BaseEntryContent):
     VIEW_STATUS: ClassVar[str | list[str]] = 'Recurring'
     EMPTY_MSG: ClassVar[str] = 'No recurring tasks.'
 
-    BINDINGS: ClassVar[list[Binding]] = [
+    BINDINGS: ClassVar[list[BindingType]] = [
         Binding('U', 'update_entry', 'Update'),
         Binding('N', 'edit_notes', 'Notes'),
         Binding('D', 'drop_entry', 'Drop'),
@@ -2952,7 +2979,7 @@ class WaitingForContent(BaseEntryContent):
     EMPTY_MSG: ClassVar[str] = 'Nothing delegated.'
     VIEW_STATUS: ClassVar[str | list[str]] = 'Waiting For'
 
-    BINDINGS: ClassVar[list[Binding]] = [
+    BINDINGS: ClassVar[list[BindingType]] = [
         Binding('U', 'update_entry', 'Update'),
         Binding('N', 'edit_notes', 'Notes'),
         Binding('D', 'mark_done', 'Done'),
@@ -2970,7 +2997,7 @@ class SomedayContent(BaseEntryContent):
     VIEW_STATUS: ClassVar[str | list[str]] = 'Someday/Maybe'
     EMPTY_MSG: ClassVar[str] = 'No someday items.'
 
-    BINDINGS: ClassVar[list[Binding]] = [
+    BINDINGS: ClassVar[list[BindingType]] = [
         Binding('A', 'activate', 'Activate'),
         Binding('L', 'move_to_list', '→ List'),
         Binding('U', 'update_entry', 'Update'),
@@ -3190,8 +3217,10 @@ class SomedayContent(BaseEntryContent):
             for entry in affected:
                 await loop.run_in_executor(
                     None,
-                    lambda eid=entry.page_id: update_page(
-                        eid, {'Area': {'select': {'name': new}}}
+                    functools.partial(
+                        update_page,
+                        entry.page_id,
+                        {'Area': {'select': {'name': new}}},
                     ),
                 )
             self._notion_areas = [
@@ -3217,7 +3246,7 @@ class SnoozedContent(BaseEntryContent):
     VIEW_FOLLOW_UP: ClassVar[str | None] = 'future'
     EMPTY_MSG: ClassVar[str] = 'Nothing in the future.'
 
-    BINDINGS: ClassVar[list[Binding]] = [
+    BINDINGS: ClassVar[list[BindingType]] = [
         Binding('U', 'update_entry', 'Update'),
         Binding('N', 'edit_notes', 'Notes'),
         Binding('D', 'mark_done', 'Done'),
@@ -3251,7 +3280,7 @@ class ListsContent(BaseEntryContent):
     VIEW_STATUS: ClassVar[str | list[str]] = 'List'
     EMPTY_MSG: ClassVar[str] = 'No list items.'
 
-    BINDINGS: ClassVar[list[Binding]] = [
+    BINDINGS: ClassVar[list[BindingType]] = [
         Binding('A', 'add_item', 'Add'),
         Binding('U', 'update_item', 'Update'),
         Binding('E', 'edit_notes', 'Notes'),
@@ -3626,8 +3655,10 @@ class ListsContent(BaseEntryContent):
             for entry in affected:
                 await loop.run_in_executor(
                     None,
-                    lambda eid=entry.page_id: update_page(
-                        eid, {'List Category': {'select': {'name': new}}}
+                    functools.partial(
+                        update_page,
+                        entry.page_id,
+                        {'List Category': {'select': {'name': new}}},
                     ),
                 )
             self._notion_categories = [
@@ -3655,15 +3686,22 @@ class ListsContent(BaseEntryContent):
         await self._rebuild_list()
 
 
-def _classify_network_error(err: Exception) -> tuple[str, str]:
-    """(message, severity) for network errors; ('', '') means re-raise."""
+# `notify` takes a Literal, so the classifier has to promise one rather
+# than a bare str.
+_Severity = Literal['information', 'warning', 'error']
+
+
+def _classify_network_error(
+    err: BaseException,
+) -> tuple[str, _Severity] | None:
+    """(message, severity) for network errors; None means re-raise."""
     import httpx
 
     if isinstance(err, httpx.TimeoutException):
         return 'Notion timed out — try again', 'warning'
     if isinstance(err, httpx.RequestError):
         return f'Network error: {err}', 'error'
-    return '', ''
+    return None
 
 
 _TAB_LABELS: dict[str, str] = {
@@ -3752,7 +3790,7 @@ class GTDApp(App[None]):
     COMMANDS: ClassVar[set] = {GTDSearchProvider}
     ENABLE_COMMAND_PALETTE = True
 
-    BINDINGS: ClassVar[list[Binding]] = [
+    BINDINGS: ClassVar[list[BindingType]] = [
         Binding('ctrl+p', 'command_palette', show=False),
         Binding('/', 'command_palette', 'Search', show=True),
         # Nothing here is priority: Textual checks priority bindings from the
@@ -3855,7 +3893,7 @@ class GTDApp(App[None]):
 
     def action_tab_right(self) -> None:
         tc = self.query_one('#tabs', TabbedContent)
-        tab_ids = [p.id for p in tc.query(TabPane)]
+        tab_ids = [p.id for p in tc.query(TabPane) if p.id is not None]
         if not tab_ids:
             return
         try:
@@ -3866,7 +3904,7 @@ class GTDApp(App[None]):
 
     def action_tab_left(self) -> None:
         tc = self.query_one('#tabs', TabbedContent)
-        tab_ids = [p.id for p in tc.query(TabPane)]
+        tab_ids = [p.id for p in tc.query(TabPane) if p.id is not None]
         if not tab_ids:
             return
         try:
@@ -3879,8 +3917,9 @@ class GTDApp(App[None]):
         from textual.worker import WorkerFailed
 
         if isinstance(error, WorkerFailed) and error.__cause__ is not None:
-            msg, severity = _classify_network_error(error.__cause__)
-            if msg:
+            classified = _classify_network_error(error.__cause__)
+            if classified:
+                msg, severity = classified
                 self.notify(msg, severity=severity)
                 return
         super()._handle_exception(error)

@@ -74,7 +74,9 @@ def current_week_start() -> str:
 def habit_done_this_week(key: str) -> bool:
     """True if this habit was last marked done in the current week."""
     last = get_weekly_habit_date(key)
-    return bool(last) and last >= current_week_start()
+    if not last:
+        return False
+    return last >= current_week_start()
 
 
 def load_review_state(num_steps: int) -> list[bool]:

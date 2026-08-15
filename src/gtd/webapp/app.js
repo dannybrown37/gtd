@@ -37,7 +37,7 @@ const CAPABILITIES = [
   // week, and `complete_habit` is the Weekly Review row on Next Steps. The
   // drill-downs reuse the entry action sheet, which is where `someday`,
   // `drop` and `change_status` (Update a field → Status) are answered.
-  'toggle',
+  'toggle_step',
   'finish_step',
   'reset',
   'complete_habit',
@@ -1446,7 +1446,7 @@ function renderReviewChecklist() {
   });
 }
 
-// Mirrors the TUI's `action_toggle`: tapping a done step un-ticks it, a
+// Mirrors the TUI's `action_toggle_step`: tapping a done step un-ticks it, a
 // manual step ticks straight away, and anything else opens its drill-down —
 // which is what ticks it, on the way out.
 async function onReviewStepTap(step) {

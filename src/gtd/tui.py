@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, ClassVar
 
 from textual import on
-from textual.binding import Binding
+from textual.binding import Binding, BindingType
 from textual.containers import Horizontal, ScrollableContainer, Vertical
 from textual.message import Message
 from textual.screen import ModalScreen
@@ -69,7 +69,9 @@ class InputModal(ModalScreen[str | None]):
     """
     )
 
-    BINDINGS: ClassVar[list[Binding]] = [Binding('escape', 'cancel', 'Cancel')]
+    BINDINGS: ClassVar[list[BindingType]] = [
+        Binding('escape', 'cancel', 'Cancel')
+    ]
 
     def __init__(
         self,
@@ -117,7 +119,7 @@ class TwoFieldModal(ModalScreen[tuple[str, str] | None]):
     """
     )
 
-    BINDINGS: ClassVar[list[Binding]] = [
+    BINDINGS: ClassVar[list[BindingType]] = [
         Binding('escape', 'cancel', 'Cancel', show=False)
     ]
 
@@ -200,7 +202,7 @@ class SelectModal(ModalScreen[str | None]):
     """
     )
 
-    BINDINGS: ClassVar[list[Binding]] = [
+    BINDINGS: ClassVar[list[BindingType]] = [
         Binding('escape', 'cancel', 'Cancel'),
         Binding('down', 'cursor_down', show=False),
         Binding('up', 'cursor_up', show=False),
@@ -288,10 +290,14 @@ class SelectModal(ModalScreen[str | None]):
         lv = self.query_one('#select-list', ListView)
         inp = self.query_one('#filter-input', Input)
         nav_keys = ('j', 'k')
-        browsing = lv.has_focus and event.is_printable
-        if browsing and event.character not in nav_keys:
+        # `is_printable` is already False when character is None, so the
+        # explicit check changes nothing at runtime -- it is the half of
+        # that guarantee the type checker can see.
+        char = event.character
+        browsing = lv.has_focus and event.is_printable and char is not None
+        if browsing and char is not None and char not in nav_keys:
             inp.focus()
-            inp.value += event.character
+            inp.value += char
             inp.cursor_position = len(inp.value)
             event.stop()
 
@@ -330,7 +336,7 @@ class ConfirmModal(ModalScreen[bool]):
     """
     )
 
-    BINDINGS: ClassVar[list[Binding]] = [
+    BINDINGS: ClassVar[list[BindingType]] = [
         Binding('escape', 'cancel', 'Cancel'),
         Binding('y', 'yes', show=False),
         Binding('n', 'cancel', show=False),
@@ -454,7 +460,7 @@ class VimListView(ListView):
     class FocusTabBar(Message):
         """Posted when k is pressed at the top of the list."""
 
-    BINDINGS: ClassVar[list[Binding]] = [
+    BINDINGS: ClassVar[list[BindingType]] = [
         Binding('ctrl+p', 'cursor_up', show=False),
         Binding('j', 'cursor_down', show=False),
         Binding('k', 'cursor_up_or_tabs', show=False),

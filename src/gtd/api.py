@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 import httpx
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, Response, jsonify, request, send_from_directory
 from dateutil import parser as dateparser
 
 from gtd.notion.capture import _create_page
@@ -48,6 +48,11 @@ from gtd.notion.views import (
 from gtd.version import get_version
 
 import logging
+
+# Every one of these helpers hands back `jsonify(...)`, which is a
+# Response and not the dict it is built from -- the annotations said
+# `tuple[dict, int]` and were simply describing the wrong object.
+_ErrorResponse = tuple[Response, int]
 
 NOTION_API_URL = 'https://api.notion.com/v1'
 NOTION_API_VERSION = '2022-06-28'
@@ -181,7 +186,7 @@ def _parse_iso_date(value: str) -> str | None:
 # region Triage Helpers
 
 
-def _validate_triage_status(status: str) -> tuple[dict, int] | None:
+def _validate_triage_status(status: str) -> _ErrorResponse | None:
     """Validate status value. Returns error tuple if invalid, None if valid."""
     if status not in TRIAGE_STATUSES:
         msg = (
@@ -194,14 +199,14 @@ def _validate_triage_status(status: str) -> tuple[dict, int] | None:
 
 def _validate_and_set_context_or_list(
     status: str, context: str, list_category: str
-) -> tuple[dict, int] | tuple[dict, None]:
+) -> _ErrorResponse | tuple[dict, None]:
     """Validate and set context or list_category.
 
     Returns (error_response, 400) if invalid, or (kwargs_dict, None) if valid.
     Performs case-insensitive matching and logs failures for debugging.
     """
     kwargs: dict = {}
-    error: tuple[dict, int] | None = None
+    error: _ErrorResponse | None = None
 
     if status == 'List':
         if not list_category:
@@ -259,7 +264,7 @@ def _validate_and_set_context_or_list(
 
 def _parse_triage_dates(
     due_date: str | None, follow_up_date: str | None
-) -> tuple[dict, int] | tuple[dict, None]:
+) -> _ErrorResponse | tuple[dict, None]:
     """Parse and validate date strings.
 
     Returns (error_response, 400) if parsing fails, or (kwargs_dict, None).
@@ -293,7 +298,7 @@ def _parse_triage_dates(
 
 def _apply_triage_updates(
     page_id: str, kwargs: dict[str, str]
-) -> tuple[dict, int]:
+) -> _ErrorResponse:
     """Apply triage updates to Notion and return updated entry.
 
     Returns (jsonified_entry, 200) or (jsonified_error, 500).

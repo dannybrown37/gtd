@@ -18,6 +18,21 @@ api = ["flask>=3.1.0"]
 gtd = "gtd.cli:main"
 
 
+# The `mypy` hook passes no targets, so this is the single answer to "what
+# does this repo type-check" -- the same one whether mypy runs from the hook
+# or from your shell.
+[tool.mypy]
+files = ["src"]
+
+# iterfzf ships no stubs and no py.typed, so there is nothing to install.
+# Scoped to the one module rather than set globally: blanket
+# ignore_missing_imports would turn every third-party symbol into Any and
+# silently stop reporting the mistakes mypy is here to catch.
+[[tool.mypy.overrides]]
+module = ["iterfzf"]
+ignore_missing_imports = true
+
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
