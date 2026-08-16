@@ -519,7 +519,11 @@ function renderChips(values, current, onPick) {
     })
     .join('');
   container.querySelectorAll('.chip').forEach((chip) => {
-    chip.addEventListener('click', () => onPick(chip.dataset.value));
+    chip.addEventListener('click', () => {
+      container.querySelectorAll('.chip').forEach((c) => c.classList.remove('active'));
+      chip.classList.add('active');
+      onPick(chip.dataset.value);
+    });
   });
 }
 
