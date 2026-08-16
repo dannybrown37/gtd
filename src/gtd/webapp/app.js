@@ -51,6 +51,11 @@ const CAPABILITIES = [
 // real one can never start with a space.
 const NO_AREA = ' (no area)';
 
+// Same trick for the context chips on the status-backed views. An entry with
+// no context is common on Projects (it is exactly what triage has not reached
+// yet), so the bucket is worth being able to select.
+const NO_CONTEXT = ' (no context)';
+
 // Each view is a tab in the TUI. `status`/`followUp` drive the generic
 // /entries endpoint; `kind` selects the loader for the ones that differ.
 const VIEWS = {
@@ -302,9 +307,12 @@ navFab.addEventListener('click', () => {
   else closeNav();
 });
 
-// Tapping the scrim, but not the sheet itself, dismisses.
+// Anything that isn't a view button dismisses — the scrim, the sheet's own
+// padding, the version line. Only .nav-item is interactive in here, so a
+// target test beats an `=== navBackdrop` test: the sheet's dead space is
+// visually "outside the menu" and a thumb lands there constantly.
 navBackdrop.addEventListener('click', (e) => {
-  if (e.target === navBackdrop) closeNav();
+  if (!e.target.closest('.nav-item')) closeNav();
 });
 
 document.addEventListener('keydown', (e) => {
@@ -583,16 +591,62 @@ async function loadNextSteps() {
   }
 }
 
+// The TUI's `F` offers only the contexts present in the tab it was pressed on,
+// not every context in Notion — a chip that filters to nothing is noise.
+function contextsInView(entries) {
+  return [...new Set(entries.filter((e) => e.context).map((e) => e.context))].sort();
+}
+
+// `state.entries` deliberately stays the *unfiltered* fetch: `removeEntryRow`
+// prunes it as actions complete, and a narrowed copy would silently drop the
+// rest of the list the moment the user cleared the chip.
+function renderEntriesForContext() {
+  const shown = state.currentContext
+    ? state.entries.filter((e) =>
+        state.currentContext === NO_CONTEXT
+          ? !e.context
+          : e.context === state.currentContext
+      )
+    : state.entries;
+  renderEntries(shown, { onTap: openActionSheet });
+  setEmpty(shown.length ? '' : 'Nothing here 🎉');
+}
+
 async function loadEntries(view) {
   const params = new URLSearchParams({ status: view.status });
   if (view.followUp) params.set('follow_up', view.followUp);
   try {
     state.entries = await apiFetch(`/entries?${params}`);
-    renderEntries(state.entries, { onTap: openActionSheet });
-    setEmpty(state.entries.length ? '' : 'Nothing here 🎉');
   } catch (err) {
     reportError(err);
+    return;
   }
+
+  const hasUncontexted = state.entries.some((e) => !e.context);
+  const available = [
+    ...contextsInView(state.entries),
+    ...(hasUncontexted ? [NO_CONTEXT] : []),
+  ];
+  // A refresh can empty out the context that was filtered on; leaving it set
+  // would show an empty list with no chip highlighted to explain why.
+  if (state.currentContext && !available.includes(state.currentContext)) {
+    state.currentContext = '';
+  }
+  renderChips(
+    [
+      { value: '', label: 'All' },
+      ...available.map((c) => ({
+        value: c,
+        label: c === NO_CONTEXT ? '(no context)' : c,
+      })),
+    ],
+    state.currentContext,
+    (value) => {
+      state.currentContext = value;
+      renderEntriesForContext();
+    }
+  );
+  renderEntriesForContext();
 }
 
 async function loadInbox() {

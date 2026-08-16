@@ -27,6 +27,11 @@ def index_html() -> str:
     return (WEBAPP / 'index.html').read_text()
 
 
+@pytest.fixture(scope='module')
+def app_js() -> str:
+    return (WEBAPP / 'app.js').read_text()
+
+
 def _rule(css: str, selector: str) -> str:
     """Return the declaration block for `selector`, or '' if absent."""
     match = re.search(
@@ -122,3 +127,21 @@ def test_nav_sheet_uses_dynamic_viewport_units(styles: str) -> None:
         assert sheet.index('max-height: 85vh') < sheet.index(
             'max-height: 85dvh'
         ), 'the vh fallback must come first or it overrides dvh'
+
+
+def test_nav_dismisses_on_any_non_item_tap(app_js: str) -> None:
+    """Tapping the sheet's dead space closes the nav, not just the scrim.
+
+    The version line and the sheet's padding sit inside `#nav-sheet`, so an
+    `e.target === navBackdrop` test left them inert — a thumb landing on the
+    bottom of the sheet did nothing. Only `.nav-item` is interactive in there.
+    """
+    handler = re.search(
+        r"navBackdrop\.addEventListener\('click'.*?\}\);", app_js, re.DOTALL
+    )
+    assert handler, 'nav backdrop needs a click handler'
+    body = handler.group(0)
+    assert "closest('.nav-item')" in body, (
+        'nav dismissal must key off .nav-item, so sheet padding also closes'
+    )
+    assert 'e.target === navBackdrop' not in body
