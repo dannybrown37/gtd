@@ -8,3 +8,7 @@ build/
 .env*
 !.env.example
 .gtd_demo_db.json
+*.pem
+*.key
+credentials*
+!credentials*.example
