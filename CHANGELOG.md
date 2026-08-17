@@ -1,4 +1,10 @@
-## Unreleased
+## v0.10.9 (2026-08-17)
+
+### Fix
+
+- udpate past change logs, explicitly ignore some patterns in gitignore
+
+## v0.10.8 (2026-08-16)
 
 ### Fix
 
