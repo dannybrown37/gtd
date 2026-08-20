@@ -1787,31 +1787,19 @@ function openAreaCaptureModal(area) {
   });
 }
 
-// The TUI's Next Steps tab always carries a Weekly Review row, done or not,
-// so the review can't be forgotten. Same contract here — it is prepended to
-// the list rather than folded into it, and it never disappears.
-function habitLastDoneStr(iso) {
-  if (!iso) return 'never';
-  const days = Math.round(
-    (new Date(`${todayISO()}T00:00`) - new Date(`${iso}T00:00`)) / 86400000
-  );
-  if (days === 0) return 'today';
-  return `${formatDate(iso)} (${days}d ago)`;
-}
-
+// The webapp has a dedicated Weekly Review view, so Next Steps only needs the
+// reminder: the row is prepended while the review is outstanding and is left
+// out once it is done this week. (The TUI still shows it in both states.)
 function prependReviewHabitRow(review) {
+  if (review.done_this_week) return;
   const li = document.createElement('li');
   li.className = 'entry habit-row';
-  const done = review.done_this_week;
-  const sub = done
-    ? `last: ${habitLastDoneStr(review.last_done)}`
-    : 'not done this week';
   li.innerHTML = `
     <div class="entry-main">
       <div class="entry-header">
-        <span class="habit-dot${done ? ' done' : ''}">●</span> Weekly Review
+        <span class="habit-dot">●</span> Weekly Review
       </div>
-      <div class="entry-sub">${escapeHtml(sub)}</div>
+      <div class="entry-sub">not done this week</div>
     </div>
     <span class="chevron" aria-hidden="true">›</span>
   `;

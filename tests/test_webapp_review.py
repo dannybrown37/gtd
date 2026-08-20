@@ -162,12 +162,12 @@ class TestHabitRow:
         body = app_js.split('prependReviewHabitRow(await')[1]
         assert 'catch' in body.split('\n}')[0]
 
-    def test_row_survives_being_done(self, app_js: str) -> None:
-        """The TUI's row never disappears; it flips state in place."""
+    def test_row_is_hidden_once_done(self, app_js: str) -> None:
+        """The webapp has a dedicated review view, so it only needs the nag."""
         body = app_js.split('function prependReviewHabitRow(review)')[1]
         head = body.split('\n}')[0]
+        assert 'if (review.done_this_week) return;' in head
         assert 'not done this week' in head
-        assert 'last:' in head
 
     def test_row_opens_the_review(self, app_js: str) -> None:
         body = app_js.split('function prependReviewHabitRow(review)')[1]
