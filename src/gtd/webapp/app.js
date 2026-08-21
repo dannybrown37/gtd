@@ -550,6 +550,7 @@ function loadActiveView() {
 async function refreshActiveView() {
   const btn = $('#refresh-btn');
   if (btn.disabled) return;
+  invalidateSchema();
   btn.disabled = true;
   btn.classList.add('spinning');
   try {
@@ -831,6 +832,13 @@ async function ensureSchema() {
   return state.schema;
 }
 
+// Statuses, contexts, areas and list categories are all Notion select options,
+// so anything that edits them makes the cached schema stale. Dropping it is
+// cheaper than reasoning about which mutation touched which option list.
+function invalidateSchema() {
+  state.schema = null;
+}
+
 function openUpdateFieldPicker(entry) {
   openModal(`
     <h2>Update</h2>
@@ -1061,6 +1069,7 @@ async function openAreaPicker(entry) {
 async function mutateAndReload(path, options, successMessage) {
   try {
     await apiFetch(path, options);
+    invalidateSchema();
     closeModal();
     showToast(successMessage);
     loadActiveView();

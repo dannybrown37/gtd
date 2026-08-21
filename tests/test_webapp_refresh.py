@@ -56,3 +56,20 @@ def test_refresh_is_declared_as_a_capability(app_js: str) -> None:
 def test_refresh_shows_it_is_working(styles: str) -> None:
     """A tap with no feedback reads as a dead button on a slow connection."""
     assert '.spinning' in styles
+
+
+def test_refresh_drops_the_cached_schema(app_js: str) -> None:
+    """A category added elsewhere never appeared until a full page reload."""
+    body = app_js.split('async function refreshActiveView')[1][:400]
+    assert 'invalidateSchema()' in body
+
+
+def test_mutations_drop_the_cached_schema(app_js: str) -> None:
+    """Adding/renaming a category or area edits the schema it caches."""
+    body = app_js.split('async function mutateAndReload')[1][:400]
+    assert 'invalidateSchema()' in body
+
+
+def test_invalidate_schema_clears_the_cache(app_js: str) -> None:
+    assert 'function invalidateSchema() {' in app_js
+    assert 'state.schema = null;' in app_js
