@@ -241,6 +241,7 @@ the terminal and vice versa.
 | `GET` | `/entries` | List entries by status, backing the webapp's per-status tabs. |
 | `PATCH` | `/entry/<page_id>` | Update any subset of an entry's fields. Mirrors the TUI's `U`. |
 | `POST` | `/entry/<page_id>/complete-step` | Tick off the entry's current step, renumbering the rest. TUI's `X`. |
+| `GET` | `/entry/<page_id>/context` | The entry as plain text, for pasting into an AI. TUI's `y`. |
 | `GET` | `/entry/<page_id>/notes` | Read an entry's page body. Mirrors the TUI's `N`. |
 | `PUT` | `/entry/<page_id>/notes` | Replace an entry's page body. Body: {"notes": "..."}. |
 | `POST` | `/entry/<page_id>/snooze` | Push an entry's follow-up date out. Mirrors the TUI's `T`. |
@@ -292,6 +293,7 @@ sections shouldn't drift in practice.
 src/gtd/
 ├── api.py          # Thin Flask wrapper around GTD Notion operations for iOS Shortcuts.
 ├── cli.py          # GTD CLI — David Allen's Getting Things Done powered by Notion.
+├── clipboard.py    # Write text to the system clipboard.
 ├── gtd_tui.py      # Unified GTD TUI.
 ├── storage.py      # Local JSON I/O for weekly review state and habit dates.
 ├── tui.py          # Shared Textual widgets and modals for the GTD TUI.

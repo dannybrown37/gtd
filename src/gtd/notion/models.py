@@ -117,3 +117,15 @@ def _get_date(prop: dict) -> str | None:
     if not date:
         return None
     return date.get('start')
+
+
+def entry_context_text(entry: ProjectEntry, notes: str = '') -> str:
+    """Title and notes only — what is worth pasting into an AI prompt.
+
+    One definition shared by the TUI's copy key and the webapp's copy
+    button; a second one written in JS would drift.
+    """
+    text = entry.header.strip()
+    if notes.strip():
+        text += '\n\n' + notes.strip()
+    return text + '\n'

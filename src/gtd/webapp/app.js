@@ -15,6 +15,7 @@ const CAPABILITIES = [
   'triage_entry',
   'triage_all',
   'complete_step',
+  'copy_context',
   'filter_context',
   'filter_list',
   'move_someday',
@@ -761,6 +762,7 @@ function openActionSheet(entry) {
       ${entry.next_step ? '<button class="action-btn" data-act="complete-step">Complete current step</button>' : ''}
       <button class="action-btn" data-act="steps">Edit next step</button>
       <button class="action-btn" data-act="notes">Notes</button>
+      <button class="action-btn" data-act="copy">Copy</button>
       <button class="action-btn" data-act="snooze">Snooze</button>
       ${isSomeday ? '<button class="action-btn" data-act="area">Assign Area</button>' : ''}
       ${isSomeday ? '<button class="action-btn" data-act="activate">Activate</button>' : ''}
@@ -781,6 +783,7 @@ function openActionSheet(entry) {
       if (act === 'complete-step') completeCurrentStep(entry);
       if (act === 'steps') openStepsModal(entry);
       if (act === 'notes') openNotesModal(entry);
+      if (act === 'copy') copyEntryContext(entry);
       if (act === 'snooze') openSnoozeModal(entry);
       if (act === 'area') openAreaPicker(entry);
       if (act === 'activate') setStatus(entry, 'Current Project');
@@ -923,6 +926,19 @@ function openStepsModal(entry) {
   $('#steps-save').addEventListener('click', () =>
     patchEntry(entry, { next_step: $('#steps-input').value }, 'Step updated')
   );
+}
+
+// The text is built server-side by `notion.models.entry_context_text`, the
+// same function the TUI's `y` uses.
+async function copyEntryContext(entry) {
+  try {
+    const { text } = await apiFetch(`/entry/${entry.page_id}/context`);
+    await navigator.clipboard.writeText(text);
+    closeModal();
+    showToast('Copied ✓');
+  } catch (err) {
+    reportError(err);
+  }
 }
 
 async function openNotesModal(entry) {

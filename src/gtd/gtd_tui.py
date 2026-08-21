@@ -65,6 +65,7 @@ from gtd.tui import (
     remove_list_item,
     repopulate,
 )
+from gtd import clipboard
 from gtd.version import get_version
 
 
@@ -922,6 +923,7 @@ class BaseEntryContent(Vertical):
 
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding('X', 'complete_step', 'Complete Step', show=True),
+        Binding('Y', 'copy_context', 'Copy', show=True),
     ]
 
     DEFAULT_CSS = """
@@ -1072,6 +1074,18 @@ class BaseEntryContent(Vertical):
         """Remove entry and refocus list. Use from actions, not triage."""
         self._remove_entry(page_id)
         self.query_one('#entry-list', VimListView).focus()
+
+    def action_copy_context(self) -> None:
+        from gtd.notion.models import entry_context_text
+
+        entry = self._current_entry()
+        if not entry:
+            return
+        notes = self._notes.get(entry.page_id, '')
+        text = entry_context_text(entry, notes)
+        if not clipboard.copy_text(text):
+            self.app.copy_to_clipboard(text)
+        self.app.notify(f'✓ Copied "{entry.header.strip()}"')
 
     def action_refresh(self) -> None:
         self._entries = []
@@ -2411,6 +2425,7 @@ class NextStepsContent(BaseEntryContent):
         'edit_notes',
         'mark_done',
         'complete_step',
+        'copy_context',
     }
     _HABIT_ACTIONS: ClassVar[set[str]] = {'complete_habit'}
 
@@ -2770,6 +2785,7 @@ class InboxContent(BaseEntryContent):
         'update_entry',
         'edit_notes',
         'drop_entry',
+        'copy_context',
     }
 
     def check_action(

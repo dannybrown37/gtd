@@ -522,6 +522,23 @@ def get_notes(page_id: str) -> Any:
         return jsonify(error=f'Could not read notes: {err}'), 500
 
 
+@app.get('/entry/<page_id>/context')
+@require_auth
+def get_entry_context(page_id: str) -> Any:
+    """The entry as plain text, for pasting into an AI. TUI's `y`."""
+    from gtd.notion.models import entry_context_text
+
+    page = _get_page_by_id(page_id)
+    if not page:
+        return jsonify(error='Entry not found'), 404
+    try:
+        notes = get_page_body(page_id)
+    except (ValueError, RuntimeError, OSError):
+        notes = ''
+    entry = ProjectEntry.from_page(page)
+    return jsonify(text=entry_context_text(entry, notes))
+
+
 @app.put('/entry/<page_id>/notes')
 @require_auth
 def put_notes(page_id: str) -> Any:
