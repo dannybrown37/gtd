@@ -86,6 +86,7 @@ Steps are `storage.REVIEW_STEPS` — the TUI aliases it as `_GTD_REVIEW_STEPS`, 
 |------|-------|
 | GTD projects/inbox | Notion database (`NOTION_PROJECTS_DB_ID`) |
 | Weekly habits | `~/.local/share/gtd/weekly_habits.json` |
+| Weekly review state | The API server when `GTD_API_URL` + `GTD_API_KEY` are set (one source of truth shared with the webapp), else the local habits file |
 | Areas of Focus | Notion `Area` select property |
 | List categories | Notion `List Category` select property |
 | Config | `~/.config/gtd/config.json` |

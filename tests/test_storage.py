@@ -334,3 +334,128 @@ class TestHabitDoneThisWeek:
         )
 
         assert habit_done_this_week('weekly_review') is True
+
+
+class TestRemoteReviewBackend:
+    """When an API server is configured, review state comes from it."""
+
+    @pytest.fixture(autouse=True)
+    def _configured(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv('GTD_API_URL', 'https://gtd.example.com')
+        monkeypatch.setenv('GTD_API_KEY', 'secret')
+
+    @staticmethod
+    def _payload(done: list[bool], last: str | None = None) -> dict:
+        return {
+            'week_start': current_week_start(),
+            'steps': [
+                {'index': i, 'label': label, 'action': action, 'done': done[i]}
+                for i, (label, action) in enumerate(REVIEW_STEPS)
+            ],
+            'last_done': last,
+            'done_this_week': False,
+        }
+
+    def _stub(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        payload: dict,
+    ) -> list[tuple[str, str, dict | None]]:
+        calls: list[tuple[str, str, dict | None]] = []
+
+        def fake(
+            method: str, path: str, json_body: dict | None = None
+        ) -> dict:
+            calls.append((method, path, json_body))
+            return payload
+
+        monkeypatch.setattr(storage, '_remote_request', fake)
+        return calls
+
+    def test_load_reads_from_api(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        done = [True] + [False] * (len(REVIEW_STEPS) - 1)
+        calls = self._stub(monkeypatch, self._payload(done))
+        assert load_review_state(len(REVIEW_STEPS)) == done
+        assert calls == [('GET', '/review', None)]
+
+    def test_set_step_posts_to_api(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        done = [False] * len(REVIEW_STEPS)
+        done[2] = True
+        calls = self._stub(monkeypatch, self._payload(done))
+        assert set_review_step(2, done=True)[2] is True
+        assert calls == [('POST', '/review/step/2', {'done': True})]
+
+    def test_save_state_posts_only_changed_steps(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        remote = [False] * len(REVIEW_STEPS)
+        calls = self._stub(monkeypatch, self._payload(remote))
+        wanted = list(remote)
+        wanted[1] = True
+        save_review_state(wanted)
+        assert calls == [
+            ('GET', '/review', None),
+            ('POST', '/review/step/1', {'done': True}),
+        ]
+
+    def test_reset_posts_to_api(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        calls = self._stub(
+            monkeypatch, self._payload([False] * len(REVIEW_STEPS))
+        )
+        reset_review_state()
+        assert calls == [('POST', '/review/reset', None)]
+
+    def test_weekly_review_habit_reads_from_api(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        payload = self._payload([False] * len(REVIEW_STEPS), '2026-08-19')
+        self._stub(monkeypatch, payload)
+        assert get_weekly_habit_date('weekly_review') == '2026-08-19'
+
+    def test_other_habits_stay_local(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        self._stub(monkeypatch, self._payload([False] * len(REVIEW_STEPS)))
+        set_weekly_habit_date('other_habit')
+        data = json.loads((tmp_path / 'weekly_habits.json').read_text())
+        assert data['other_habit'] == datetime.now().date().isoformat()
+
+    def test_marking_review_done_posts_complete(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls = self._stub(
+            monkeypatch, self._payload([False] * len(REVIEW_STEPS))
+        )
+        set_weekly_habit_date('weekly_review')
+        assert calls == [('POST', '/review/complete', None)]
+
+    def test_falls_back_to_local_when_api_unreachable(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def boom(*_args: object, **_kwargs: object) -> dict:
+            msg = 'no network'
+            raise OSError(msg)
+
+        monkeypatch.setattr(storage, '_remote_request', boom)
+        save_review_state([True] + [False] * (len(REVIEW_STEPS) - 1))
+        assert load_review_state(len(REVIEW_STEPS))[0] is True
+
+
+class TestRemoteNotConfigured:
+    def test_url_without_key_stays_local(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv('GTD_API_URL', 'https://gtd.example.com')
+        monkeypatch.delenv('GTD_API_KEY', raising=False)
+        assert storage._remote_base() is None  # noqa: SLF001
+
+    def test_key_without_url_stays_local(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv('GTD_API_URL', raising=False)
+        monkeypatch.setenv('GTD_API_KEY', 'secret')
+        assert storage._remote_base() is None  # noqa: SLF001

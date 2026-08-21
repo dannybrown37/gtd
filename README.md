@@ -295,7 +295,7 @@ src/gtd/
 ├── cli.py          # GTD CLI — David Allen's Getting Things Done powered by Notion.
 ├── clipboard.py    # Write text to the system clipboard.
 ├── gtd_tui.py      # Unified GTD TUI.
-├── storage.py      # Local JSON I/O for weekly review state and habit dates.
+├── storage.py      # Storage for weekly review state and habit dates.
 ├── tui.py          # Shared Textual widgets and modals for the GTD TUI.
 ├── ui.py           # fzf helpers, prompts, and formatting shared across CLI commands.
 ├── version.py      # Single source of the running version, read from installed package metadata.

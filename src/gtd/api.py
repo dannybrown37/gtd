@@ -937,15 +937,23 @@ def done(page_id: str) -> Any:
 # region Weekly review
 
 
+def _done_this_week() -> bool:
+    last = storage.local_get_weekly_habit_date(storage.WEEKLY_REVIEW_HABIT)
+    if not last:
+        return False
+    return last >= storage.current_week_start()
+
+
 def _review_payload() -> dict:
     """The weekly review's checklist state.
 
-    Deliberately local-only: it reads `~/.local/share/gtd/weekly_habits.json`
-    and never touches Notion, so a Notion outage can't take the checklist
-    down, and the phone and the TUI share one set of ticks. The per-step work
-    is done through the existing entry endpoints.
+    Always the `local_*` storage calls, never the routed ones: this server's
+    own `weekly_habits.json` is the review's single source of truth, and the
+    routed calls proxy right back here when GTD_API_URL is in this process's
+    environment. Notion is never touched, so a Notion outage can't take the
+    checklist down. The per-step work uses the existing entry endpoints.
     """
-    done = storage.load_review_state(len(storage.REVIEW_STEPS))
+    done = storage.local_load_review_state(len(storage.REVIEW_STEPS))
     return {
         'week_start': storage.current_week_start(),
         'steps': [
@@ -957,12 +965,10 @@ def _review_payload() -> dict:
             }
             for i, (label, action) in enumerate(storage.REVIEW_STEPS)
         ],
-        'last_done': storage.get_weekly_habit_date(
+        'last_done': storage.local_get_weekly_habit_date(
             storage.WEEKLY_REVIEW_HABIT
         ),
-        'done_this_week': storage.habit_done_this_week(
-            storage.WEEKLY_REVIEW_HABIT
-        ),
+        'done_this_week': _done_this_week(),
     }
 
 
@@ -983,7 +989,7 @@ def review_step(index: int) -> Any:
     if not isinstance(body['done'], bool):
         return jsonify(error='"done" must be true or false'), 400
     try:
-        storage.set_review_step(index, done=body['done'])
+        storage.local_set_review_step(index, done=body['done'])
     except IndexError as err:
         return jsonify(error=str(err)), 404
     return jsonify(_review_payload())
@@ -993,7 +999,7 @@ def review_step(index: int) -> Any:
 @require_auth
 def review_reset() -> Any:
     """Clear this week's weekly review progress. Mirrors the TUI's `X`."""
-    storage.reset_review_state()
+    storage.local_reset_review_state()
     return jsonify(_review_payload())
 
 
@@ -1001,7 +1007,7 @@ def review_reset() -> Any:
 @require_auth
 def review_complete() -> Any:
     """Mark the weekly review itself done for this week."""
-    storage.set_weekly_habit_date(storage.WEEKLY_REVIEW_HABIT)
+    storage.local_set_weekly_habit_date(storage.WEEKLY_REVIEW_HABIT)
     return jsonify(_review_payload())
 
 
