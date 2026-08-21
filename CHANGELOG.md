@@ -1,3 +1,13 @@
+## v0.11.0 (2026-08-21)
+
+### Feat
+
+- **tui**: add Y shortcut to copy the title and notes for an entry
+
+### Fix
+
+- web app reloads schema after schema changes
+
 ## v0.10.10 (2026-08-21)
 
 ### Fix
