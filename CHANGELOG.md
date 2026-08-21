@@ -1,3 +1,9 @@
+## v0.10.10 (2026-08-21)
+
+### Fix
+
+- on web app (where there is a dedicated view), don't show weekly review on next steps page when it's not due
+
 ## v0.10.9 (2026-08-17)
 
 ### Fix
