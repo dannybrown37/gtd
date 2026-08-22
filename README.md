@@ -98,7 +98,7 @@ re-running the command (no reinstall needed unless dependencies change).
 gtd
 ```
 
-With no subcommand, `gtd` launches the Textual TUI — tabs for Next Steps,
+With no subcommand, `gtd` launches the Textual TUI: tabs for Next Steps,
 Inbox, Projects, Waiting For, Incubation, Recurring, Someday, and Lists,
 plus a guided Weekly Review. This is the primary interface.
 
