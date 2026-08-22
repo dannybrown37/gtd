@@ -1,3 +1,18 @@
+## v0.12.0 (2026-08-22)
+
+### Feat
+
+- **tui**: add ical from envar parsing to merge multiple calendars in
+- **tui**: add calendar tab! use gfunk cli to pull data for it
+
+### Fix
+
+- try again to debug CI-only fail
+- CI
+- clarity for one of the snooze options
+- remove Steps/Tomorrow from TUI, just do Snooze with matching option to web app
+- non-finished shared weekly review status between TUI/PWA
+
 ## v0.11.0 (2026-08-21)
 
 ### Feat
