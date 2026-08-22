@@ -1,4 +1,4 @@
-"""Suite-wide safety net: no test may reach the network.
+"""Suite-wide safety nets: no test may reach the network or `gfunk`.
 
 Every GTD write path ends at a live Notion database, and `archive_page`
 moves a real page to the trash. Credentials are usually present in a
@@ -48,3 +48,35 @@ def _block_network(monkeypatch: pytest.MonkeyPatch) -> None:
         'handle_async_request',
         _blocked,
     )
+
+
+class CalendarAccessBlockedError(RuntimeError):
+    """Raised when a test tries to shell out to the real `gfunk`."""
+
+
+_CALENDAR_MESSAGE = (
+    'Blocked a real `gfunk` call from the test suite ({argv}). Pass a '
+    '`runner=` to `gcal.fetch_events`, or patch `gcal.fetch_events` — a '
+    "live call here reads the developer's own Google Calendar."
+)
+
+
+@pytest.fixture(autouse=True)
+def _block_calendar(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The calendar's twin of `_block_network`.
+
+    `gcal` reaches Google through a subprocess, not `httpx`, so the
+    transport guard above never sees it. Without this, any test that
+    mounts the TUI reads the developer's real calendar — and on a machine
+    with no `gfunk` it would pass anyway, so the gap would only ever
+    show up as a mystery failure on someone else's laptop.
+    """
+    from gtd import gcal
+
+    def _blocked(argv: list[str]) -> Never:
+        raise CalendarAccessBlockedError(
+            _CALENDAR_MESSAGE.format(argv=' '.join(argv)),
+        )
+
+    monkeypatch.setattr(gcal, '_run', _blocked)
+    monkeypatch.setattr(gcal.shutil, 'which', lambda _name: '/blocked/gfunk')

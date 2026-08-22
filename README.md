@@ -294,6 +294,7 @@ src/gtd/
 ├── api.py          # Thin Flask wrapper around GTD Notion operations for iOS Shortcuts.
 ├── cli.py          # GTD CLI — David Allen's Getting Things Done powered by Notion.
 ├── clipboard.py    # Write text to the system clipboard.
+├── gcal.py         # Google Calendar, read-only, borrowed from `gfunk`.
 ├── gtd_tui.py      # Unified GTD TUI.
 ├── storage.py      # Storage for weekly review state and habit dates.
 ├── tui.py          # Shared Textual widgets and modals for the GTD TUI.

@@ -10,7 +10,7 @@ import random
 import re
 import subprocess
 import tempfile
-from datetime import datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar, Literal, Protocol, TypeVar
@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
 
     from gtd.notion.models import ProjectEntry
+    from gtd.gcal import CalDay
 
 from textual import on, work
 from textual.app import App, ComposeResult
@@ -65,7 +66,7 @@ from gtd.tui import (
     remove_list_item,
     repopulate,
 )
-from gtd import clipboard
+from gtd import clipboard, gcal
 from gtd.version import get_version
 
 
@@ -505,6 +506,30 @@ class SeparatorListItem(ListItem):
 
     def compose(self) -> ComposeResult:
         yield Label(f'[dim]── {self._label} ──[/dim]', markup=True)
+
+
+class LoadRibbonItem(ListItem):
+    """Today's calendar load, sitting above the next steps.
+
+    Disabled, so it never takes the highlight and no action can fire on
+    it — it is a readout, not a row. It only appears when a calendar is
+    actually reachable; a machine without `gfunk` simply never sees it.
+    """
+
+    def __init__(self, text: str) -> None:
+        super().__init__(disabled=True)
+        self._text = text
+
+    @property
+    def raw_text(self) -> str:
+        return self._text
+
+    def compose(self) -> ComposeResult:
+        yield Label(self._text, markup=True)
+
+    def update_text(self, text: str) -> None:
+        self._text = text
+        self.query_one(Label).update(text)
 
 
 class NextStepListItem(EntryListItem):
@@ -2447,11 +2472,48 @@ class NextStepsContent(BaseEntryContent):
         super().__init__()
         self._habit_items: list[WeeklyHabitItem] = []
         self._ctx_filter: str | None = None
+        self._load_text: str | None = None
+
+    def on_mount(self) -> None:
+        super().on_mount()
+        self._load_today_ribbon()
 
     def _fetch(self) -> list[ProjectEntry]:
         from gtd.notion.views import next_steps_entries
 
         return next_steps_entries()
+
+    @work(thread=True)
+    def _load_today_ribbon(self) -> None:
+        """Read today's calendar load on its own thread.
+
+        Separate from `_load_entries` on purpose: this shells out to
+        `gfunk` and Notion shouldn't wait on that, nor the reverse. Any
+        failure is silent — no calendar means no ribbon, which is the
+        normal state on a machine that never opted in.
+        """
+        try:
+            events = gcal.fetch_events(days=1)
+            day = gcal.group_days(events, start=date.today(), num_days=1)[0]
+            text = _today_load_text(day)
+        except Exception:
+            return
+        self.app.call_from_thread(self._show_load_ribbon, text)
+
+    def action_refresh(self) -> None:
+        """Re-read the calendar too — the day fills up as it goes."""
+        super().action_refresh()
+        self._load_today_ribbon()
+
+    def _show_load_ribbon(self, text: str) -> None:
+        self._load_text = text
+        with contextlib.suppress(Exception):
+            lv = self.query_one('#entry-list', VimListView)
+            existing = lv.query(LoadRibbonItem)
+            if existing:
+                existing.first(LoadRibbonItem).update_text(text)
+            else:
+                lv.insert(0, [LoadRibbonItem(text)])
 
     def _filtered_entries(self) -> list[ProjectEntry]:
         if self._ctx_filter:
@@ -2463,7 +2525,10 @@ class NextStepsContent(BaseEntryContent):
         lv: VimListView,
         entries: list[ProjectEntry],
     ) -> None:
-        items: list[ListItem] = list(self._habit_items)
+        items: list[ListItem] = []
+        if self._load_text:
+            items.append(LoadRibbonItem(self._load_text))
+        items.extend(self._habit_items)
         items.extend(_context_grouped_items(entries, NextStepListItem))
         await repopulate(lv, items)
 
@@ -3716,6 +3781,268 @@ class ListsContent(BaseEntryContent):
         await self._rebuild_list()
 
 
+_CAL_LOAD_COLOUR = {
+    'light': 'green',
+    'moderate': 'yellow',
+    'heavy': 'red',
+}
+
+# A week is the horizon a weekly review works on; the past half exists so
+# the "Review Calendar (Past & Upcoming)" step has a past to review.
+CAL_DAYS_AHEAD = 7
+CAL_DAYS_BEHIND = 7
+
+
+def _fmt_time(moment: time) -> str:
+    text = moment.strftime('%I:%M%p').lower().lstrip('0')
+    return text.replace(':00', '')
+
+
+def _cal_day_row(day: CalDay, *, today: date) -> str:
+    """One line per day: how full it is, and the shape of the fullness."""
+    name = day.date.strftime('%a %b %d')
+    if day.date == today:
+        name = f'[bold]{name}[/bold]'
+    elif day.date < today:
+        name = f'[dim]{name}[/dim]'
+
+    count = len(day.events)
+    colour = _CAL_LOAD_COLOUR[day.load]
+    hours = f'[{colour}]{day.total_hours:.1f}h[/{colour}]'
+    stats = f'{count}x {hours}' if count else '[dim]clear[/dim]'
+    bar = gcal.busy_bar(day)
+    return f'{name}  [dim]{bar}[/dim]  {stats}'
+
+
+def _today_load_text(day: CalDay) -> str:
+    """One line answering "is there room today?".
+
+    Booked hours alone don't answer it — 4h booked as one block and 4h
+    booked as eight scattered meetings are different days. So the gap
+    comes along too.
+    """
+    colour = _CAL_LOAD_COLOUR[day.load]
+    free = gcal.free_hours(day)
+    head = (
+        f'[{colour}]{day.total_hours:.1f}h booked[/{colour}], {free:.1f}h free'
+    )
+    gap = gcal.largest_gap(day)
+    if gap is None:
+        tail = '[red]no open time[/red]'
+    else:
+        span = f'{_fmt_time(gap[0])}-{_fmt_time(gap[1])}'
+        tail = f'largest gap [green]{span}[/green]'
+    return f'[bold]Today[/bold]  {head} — {tail}'
+
+
+def _cal_entry_line(entry: ProjectEntry) -> str:
+    icon = STATUS_ICONS.get(entry.status, '·')
+    ctx = f'  [dim]{entry.context}[/dim]' if entry.context else ''
+    return f'  {icon} {entry.header.strip()}{ctx}'
+
+
+def _entries_on(entries: list[ProjectEntry], day: date) -> list[ProjectEntry]:
+    """Next steps whose due or follow-up date lands on this day."""
+    stamp = day.isoformat()
+    return [
+        e
+        for e in entries
+        if stamp in {(e.due_date or '')[:10], (e.follow_up_date or '')[:10]}
+    ]
+
+
+def _render_cal_day_detail(
+    day: CalDay,
+    entries: list[ProjectEntry],
+) -> str:
+    """The day itself, then the holes in it, then what could fill them."""
+    lines = [f'[bold]{day.date.strftime("%A, %B %d")}[/bold]', '']
+
+    for title in day.all_day:
+        lines.append(f'  [magenta]▪[/magenta] {title}')
+    if day.all_day:
+        lines.append('')
+
+    if day.events:
+        for event in day.events:
+            start = _fmt_time(event.start.time())
+            end = _fmt_time(event.end.time())
+            when = f'{start}-{end}'
+            place = event.location.split(',')[0]
+            where = f'  [dim]{place}[/dim]' if place else ''
+            lines.append(f'  [cyan]{when:>13}[/cyan]  {event.summary}{where}')
+        booked = f'{day.total_hours:.1f}h booked'
+        colour = _CAL_LOAD_COLOUR[day.load]
+        conflicts = (
+            f', [red]{day.conflicts} overlap[/red]' if day.conflicts else ''
+        )
+        lines.append('')
+        lines.append(f'  [{colour}]{booked}[/{colour}]{conflicts}')
+    elif not day.all_day:
+        lines.append('  [dim]Nothing scheduled.[/dim]')
+
+    gaps = gcal.usable_gaps(day)
+    lines.append('')
+    lines.append('[bold]Open time[/bold]')
+    if gaps:
+        for gap_start, gap_end in gaps:
+            span = f'{_fmt_time(gap_start)}-{_fmt_time(gap_end)}'
+            lines.append(f'  [green]{span}[/green]')
+    else:
+        lines.append('  [dim]No usable gaps.[/dim]')
+
+    lines.append('')
+    lines.append('[bold]Due this day[/bold]')
+    due = _entries_on(entries, day.date)
+    if due:
+        lines.extend(_cal_entry_line(e) for e in due)
+    else:
+        lines.append('  [dim]Nothing due.[/dim]')
+
+    return '\n'.join(lines)
+
+
+class CalDayListItem(ListItem):
+    """One day in the calendar list."""
+
+    def __init__(self, day: CalDay, *, today: date) -> None:
+        super().__init__()
+        self.day_date = day.date
+        self._text = _cal_day_row(day, today=today)
+
+    def compose(self) -> ComposeResult:
+        yield Label(self._text, markup=True)
+
+
+class CalendarContent(Vertical):
+    """The week, and where the gaps in it are.
+
+    Deliberately not a `BaseEntryContent` subclass: that base is built
+    around a list of `ProjectEntry` and a Notion page id per row — notes
+    loading, `complete_step`, `copy_context`. A calendar row is a day, so
+    inheriting would mean overriding almost all of it and leaving actions
+    that fire on nothing. It borrows the base's layout and element ids
+    instead, which is what the app-level focus helpers actually query.
+    """
+
+    TITLE: ClassVar[str] = 'Calendar'
+
+    DEFAULT_CSS = BaseEntryContent.DEFAULT_CSS.replace(
+        'BaseEntryContent', 'CalendarContent'
+    )
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._days: list[CalDay] = []
+        self._entries: list[ProjectEntry] = []
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id='entry-list-pane'):
+            yield Static(self.TITLE, id='entry-list-header')
+            yield LoadingIndicator(id='entry-loading')
+            yield VimListView(id='entry-list')
+        with DetailPane(id='entry-detail-pane'):
+            yield Static('', id='entry-detail', markup=True)
+
+    def on_mount(self) -> None:
+        self._load_days()
+
+    def _fetch(self) -> tuple[list[CalDay], list[ProjectEntry]]:
+        """The window, plus the next steps that might fill its gaps.
+
+        Raises `CalendarUnavailableError` when there is no calendar to
+        read; the caller turns that into an empty state, never an error.
+        """
+        from gtd.notion.views import next_steps_entries
+
+        events = gcal.fetch_events(
+            days=CAL_DAYS_AHEAD, since_days=CAL_DAYS_BEHIND
+        )
+        start = date.today() - timedelta(days=CAL_DAYS_BEHIND)
+        days = gcal.group_days(
+            events, start=start, num_days=CAL_DAYS_BEHIND + CAL_DAYS_AHEAD
+        )
+        try:
+            entries = next_steps_entries()
+        except Exception:
+            # A Notion outage should still leave the calendar readable.
+            entries = []
+        return days, entries
+
+    @work(thread=True)
+    def _load_days(self) -> None:
+        try:
+            days, entries = self._fetch()
+        except gcal.CalendarUnavailableError as e:
+            hint = e.hint
+            self.app.call_from_thread(self._set_unavailable, hint)
+            return
+        except Exception as e:
+            self.app.call_from_thread(self._set_unavailable, str(e))
+            return
+        self.app.call_from_thread(self._set_days, days, entries)  # type: ignore[arg-type]
+
+    def _hide_loading(self) -> None:
+        with contextlib.suppress(Exception):
+            self.query_one('#entry-loading', LoadingIndicator).display = False
+
+    def _set_unavailable(self, hint: str) -> None:
+        """No calendar is a normal state, so it renders as advice."""
+        self._days = []
+        self._hide_loading()
+        self.query_one('#entry-list-header', Static).update(
+            f'{self.TITLE} — off'
+        )
+        self.query_one('#entry-detail', Static).update(f'[dim]{hint}[/dim]')
+
+    async def _set_days(
+        self,
+        days: list[CalDay],
+        entries: list[ProjectEntry],
+    ) -> None:
+        self._days = days
+        self._entries = entries
+        self._hide_loading()
+        today = date.today()
+        lv = self.query_one('#entry-list', VimListView)
+        await repopulate(
+            lv, (CalDayListItem(day, today=today) for day in days)
+        )
+        booked = sum(d.total_hours for d in days)
+        self.query_one('#entry-list-header', Static).update(
+            f'{self.TITLE}  [dim]({booked:.0f}h over {len(days)}d)[/dim]'
+        )
+        for idx, day in enumerate(days):
+            if day.date == today:
+                lv.index = idx
+                break
+        self._update_detail()
+
+    @on(ListView.Highlighted, '#entry-list')
+    def on_list_highlighted(self) -> None:
+        self._update_detail()
+
+    def _current_day(self) -> CalDay | None:
+        idx = self.query_one('#entry-list', VimListView).index
+        if idx is None or idx >= len(self._days):
+            return None
+        return self._days[idx]
+
+    def _update_detail(self) -> None:
+        day = self._current_day()
+        if day is None:
+            return
+        self.query_one('#entry-detail', Static).update(
+            _render_cal_day_detail(day, self._entries)
+        )
+
+    def action_refresh(self) -> None:
+        """Re-read the window — the app-level `R` lands here."""
+        with contextlib.suppress(Exception):
+            self.query_one('#entry-loading', LoadingIndicator).display = True
+        self._load_days()
+
+
 # `notify` takes a Literal, so the classifier has to promise one rather
 # than a bare str.
 _Severity = Literal['information', 'warning', 'error']
@@ -3851,6 +4178,8 @@ class GTDApp(App[None]):
         with TabbedContent(id='tabs'):
             with TabPane('Next Steps', id='tab-next-steps'):
                 yield NextStepsContent()
+            with TabPane('Calendar', id='tab-calendar'):
+                yield CalendarContent()
             with TabPane('Inbox', id='tab-inbox'):
                 yield InboxContent()
             with TabPane('Projects', id='tab-projects'):

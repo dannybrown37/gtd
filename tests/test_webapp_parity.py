@@ -42,6 +42,7 @@ TUI_WIDGETS = [
     gtd_tui.GTDApp,
     gtd_tui.BaseEntryContent,
     gtd_tui.NextStepsContent,
+    gtd_tui.CalendarContent,
     gtd_tui.InboxContent,
     gtd_tui.ProjectsContent,
     gtd_tui.RecurringContent,

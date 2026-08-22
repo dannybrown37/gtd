@@ -14,6 +14,7 @@ src/gtd/
 ├── gtd_tui.py      # Textual TUI — GTDApp, all tab content widgets
 ├── tui.py          # Shared widgets: modals, DetailPane, VimListView
 ├── api.py          # Flask HTTP API + serves webapp/ as a PWA
+├── gcal.py         # Google Calendar, read-only, via the `gfunk` CLI
 ├── storage.py      # Local JSON I/O (~/.local/share/gtd/)
 ├── ui.py           # fzf helpers
 ├── webapp/         # Static PWA frontend (index.html, app.js, styles.css)
@@ -55,9 +56,25 @@ Mirrored by `_process_single_entry` in `notion/triage.py` (CLI flow). Patch both
 
 ## TUI Layout
 
-Tabs: **Next Steps | Inbox | Projects | Waiting For | Incubation | Recurring | Someday | Lists**
+Tabs: **Next Steps | Calendar | Inbox | Projects | Waiting For | Incubation | Recurring | Someday | Lists**
 
-All tabs extend `BaseEntryContent`. A tab declares `VIEW_STATUS` (optionally `VIEW_FOLLOW_UP`) and the base class fetches via `views.entries_for_status`; tabs with different views override `_fetch()` to call another `views.py` function.
+All tabs except **Calendar** extend `BaseEntryContent`; see below.
+
+All entry tabs extend `BaseEntryContent`. A tab declares `VIEW_STATUS` (optionally `VIEW_FOLLOW_UP`) and the base class fetches via `views.entries_for_status`; tabs with different views override `_fetch()` to call another `views.py` function.
+
+### Calendar (read-only, optional)
+
+`CalendarContent` is the one tab that is **not** a `BaseEntryContent` — its rows are days, not Notion pages, so it borrows the layout and element ids but not the base class.
+
+GTD holds no Google credentials. `gcal.py` shells out to `gfunk grind --json` (`/home/danny/projects/gfunk`), which owns the OAuth token and an opt-in `calendar.readonly` scope. Consequences:
+
+- Calendar is **optional everywhere**. No gfunk, no token, or no `--with-calendar` opt-in raises `gcal.CalendarUnavailableError`, whose `hint` every surface renders as an empty state — never an error.
+- Binary resolution: `GTD_GFUNK_BIN` env → `gfunk_bin` config key → `gfunk` on PATH.
+- Working hours (`calendar_day_start` / `calendar_day_end`, default 08:00–20:00) define what counts as free time.
+- `gcal.py` imports nothing from Notion, Textual, or Google. All rendering lives in `gtd_tui.py`; all parsing lives in `gcal.py`.
+- The **Next Steps** tab carries a `LoadRibbonItem` showing today's load. It loads on its own `@work(thread=True)`, separate from `_load_entries`, so Notion never waits on a subprocess. It is `disabled=True`, so it can't take the highlight or fire an action, and it is simply absent when there is no calendar.
+- `tests/conftest.py` blocks `gcal._run` suite-wide, the same way it blocks httpx. Without it the suite reads the developer's real Google Calendar — and passes anyway on a machine with no `gfunk`.
+- `group_days` is a deliberate **port** of gfunk's `grind_days`, not an import — importing it would pull gfunk's whole CLI module in. `free_spans` / `usable_gaps` are GTD's own addition and the reason the tab exists.
 
 ### Key Textual conventions
 
