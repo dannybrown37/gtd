@@ -15,6 +15,7 @@ src/gtd/
 ├── tui.py          # Shared widgets: modals, DetailPane, VimListView
 ├── api.py          # Flask HTTP API + serves webapp/ as a PWA
 ├── gcal.py         # Google Calendar, read-only, via the `gfunk` CLI
+├── ics.py          # Subscribed iCalendar feeds (work Outlook, etc.)
 ├── storage.py      # Local JSON I/O (~/.local/share/gtd/)
 ├── ui.py           # fzf helpers
 ├── webapp/         # Static PWA frontend (index.html, app.js, styles.css)
@@ -74,6 +75,18 @@ GTD holds no Google credentials. `gcal.py` shells out to `gfunk grind --json` (`
 - `gcal.py` imports nothing from Notion, Textual, or Google. All rendering lives in `gtd_tui.py`; all parsing lives in `gcal.py`.
 - The **Next Steps** tab carries a `LoadRibbonItem` showing today's load. It loads on its own `@work(thread=True)`, separate from `_load_entries`, so Notion never waits on a subprocess. It is `disabled=True`, so it can't take the highlight or fire an action, and it is simply absent when there is no calendar.
 - `tests/conftest.py` blocks `gcal._run` suite-wide, the same way it blocks httpx. Without it the suite reads the developer's real Google Calendar — and passes anyway on a machine with no `gfunk`.
+#### Subscribed feeds (`ics.py`)
+
+Some calendars — a published Exchange/Outlook feed, for one — hand out an `.ics` URL that Google Calendar refuses to subscribe to, leaving a whole working week invisible to `gcal.py`. `ics.py` reads those directly.
+
+- **`GTD_ICS_URL`** (or the `ics_url` config key) holds one or more feed URLs, comma-separated. **The URL is a bearer secret** — anyone holding it reads the calendar forever, with no sign-in. It must never appear in the repo, in a test fixture, or in a commit.
+- Only `http(s)` URLs are accepted (`webcal://` is rewritten). A config value must never become a `file://` read.
+- `parse_events` returns dicts in **Google's event shape**, plus a `_source` key. That is the whole trick: `group_days` and every renderer above it merge both calendars with no idea a second source exists. `CalEvent.source` carries it through to the ▪ work / ▫ personal marker.
+- Recurrence is delegated to `recurring-ical-events`, not hand-rolled. These feeds carry repeat rules, per-occurrence exclusions, and single-instance overrides that must *suppress* the instance they replace — a hand-rolled expander double-counts those silently. (Verified: it does.)
+- Busy rules — only Exchange `FREE`, `TRANSP:TRANSPARENT`, and `STATUS:CANCELLED` are dropped. `TENTATIVE` and `OOF` hold time.
+- `fetch_events` **never raises**. One dead subscription must not blank out the calendar.
+- `gcal.merged_events()` folds both sources together and returns `(events, hint)`. It raises only when there is nothing at all to show, so a machine with no `gfunk` still sees the work calendar; the tab shows `partial` when one source was unreadable.
+
 - `group_days` is a deliberate **port** of gfunk's `grind_days`, not an import — importing it would pull gfunk's whole CLI module in. `free_spans` / `usable_gaps` are GTD's own addition and the reason the tab exists.
 
 ### Key Textual conventions

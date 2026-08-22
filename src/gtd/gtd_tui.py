@@ -2493,7 +2493,7 @@ class NextStepsContent(BaseEntryContent):
         normal state on a machine that never opted in.
         """
         try:
-            events = gcal.fetch_events(days=1)
+            events, _ = gcal.merged_events(days=1)
             day = gcal.group_days(events, start=date.today(), num_days=1)[0]
             text = _today_load_text(day)
         except Exception:
@@ -2514,6 +2514,10 @@ class NextStepsContent(BaseEntryContent):
                 existing.first(LoadRibbonItem).update_text(text)
             else:
                 lv.insert(0, [LoadRibbonItem(text)])
+                # insert() shifts every row down but leaves index alone,
+                # which would leave it pointing at the disabled ribbon.
+                if lv.index is not None:
+                    lv.index += 1
 
     def _filtered_entries(self) -> list[ProjectEntry]:
         if self._ctx_filter:
@@ -3781,6 +3785,13 @@ class ListsContent(BaseEntryContent):
         await self._rebuild_list()
 
 
+# Which calendar a block came from. Deliberately quiet -- it answers
+# "can I move this?" without competing with the event itself.
+_CAL_SOURCE_MARK = {
+    '': '[dim]▫[/dim]',
+    'work': '[blue]▪[/blue]',
+}
+
 _CAL_LOAD_COLOUR = {
     'light': 'green',
     'moderate': 'yellow',
@@ -3870,7 +3881,10 @@ def _render_cal_day_detail(
             when = f'{start}-{end}'
             place = event.location.split(',')[0]
             where = f'  [dim]{place}[/dim]' if place else ''
-            lines.append(f'  [cyan]{when:>13}[/cyan]  {event.summary}{where}')
+            mark = _CAL_SOURCE_MARK.get(event.source, _CAL_SOURCE_MARK[''])
+            lines.append(
+                f'  [cyan]{when:>13}[/cyan] {mark} {event.summary}{where}'
+            )
         booked = f'{day.total_hours:.1f}h booked'
         colour = _CAL_LOAD_COLOUR[day.load]
         conflicts = (
@@ -3878,6 +3892,10 @@ def _render_cal_day_detail(
         )
         lines.append('')
         lines.append(f'  [{colour}]{booked}[/{colour}]{conflicts}')
+        if any(e.source for e in day.events):
+            work = _CAL_SOURCE_MARK['work']
+            own = _CAL_SOURCE_MARK['']
+            lines.append(f'  [dim]{work} work   {own} personal[/dim]')
     elif not day.all_day:
         lines.append('  [dim]Nothing scheduled.[/dim]')
 
@@ -3935,6 +3953,8 @@ class CalendarContent(Vertical):
         super().__init__()
         self._days: list[CalDay] = []
         self._entries: list[ProjectEntry] = []
+        # Set when one source was readable and the other wasn't.
+        self._partial_hint: str | None = None
 
     def compose(self) -> ComposeResult:
         with Vertical(id='entry-list-pane'):
@@ -3955,9 +3975,10 @@ class CalendarContent(Vertical):
         """
         from gtd.notion.views import next_steps_entries
 
-        events = gcal.fetch_events(
+        events, hint = gcal.merged_events(
             days=CAL_DAYS_AHEAD, since_days=CAL_DAYS_BEHIND
         )
+        self._partial_hint = hint
         start = date.today() - timedelta(days=CAL_DAYS_BEHIND)
         days = gcal.group_days(
             events, start=start, num_days=CAL_DAYS_BEHIND + CAL_DAYS_AHEAD
@@ -4009,8 +4030,10 @@ class CalendarContent(Vertical):
             lv, (CalDayListItem(day, today=today) for day in days)
         )
         booked = sum(d.total_hours for d in days)
+        partial = '  [yellow]partial[/yellow]' if self._partial_hint else ''
         self.query_one('#entry-list-header', Static).update(
             f'{self.TITLE}  [dim]({booked:.0f}h over {len(days)}d)[/dim]'
+            f'{partial}'
         )
         for idx, day in enumerate(days):
             if day.date == today:

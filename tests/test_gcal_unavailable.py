@@ -208,3 +208,62 @@ def test_a_nonsense_configured_time_falls_back_rather_than_crashing(
         gcal.DEFAULT_DAY_START,
         gcal.DEFAULT_DAY_END,
     )
+
+
+class TestMergedEvents:
+    """Google and the subscribed feeds, folded into one list.
+
+    Either source failing alone must not blank out the other — a laptop
+    with no `gfunk` should still show the work calendar, and a dead feed
+    subscription must not hide Google.
+    """
+
+    def _merge(
+        self, monkeypatch, *, google=None, work=None, google_fails=''
+    ) -> tuple:
+        from gtd import ics
+
+        def fake_google(**_: object) -> list:
+            if google_fails:
+                raise gcal.CalendarUnavailableError(google_fails)
+            return list(google or [])
+
+        monkeypatch.setattr(gcal, 'fetch_events', fake_google)
+        monkeypatch.setattr(ics, 'fetch_events', lambda **_: list(work or []))
+        return gcal.merged_events(days=7)
+
+    def test_both_sources_are_combined(self, monkeypatch):
+        events, hint = self._merge(
+            monkeypatch,
+            google=[{'summary': 'Personal'}],
+            work=[{'summary': 'Busy'}],
+        )
+
+        assert len(events) == 2
+        assert hint is None
+
+    def test_a_dead_google_still_shows_the_work_feed(self, monkeypatch):
+        events, hint = self._merge(
+            monkeypatch,
+            google_fails='no gfunk',
+            work=[{'summary': 'Busy'}],
+        )
+
+        assert len(events) == 1
+        assert hint == 'no gfunk'
+
+    def test_no_feeds_and_no_google_is_unavailable(self, monkeypatch):
+        with pytest.raises(gcal.CalendarUnavailableError):
+            self._merge(monkeypatch, google_fails='no gfunk')
+
+    def test_google_alone_is_fine(self, monkeypatch):
+        events, hint = self._merge(monkeypatch, google=[{'summary': 'A'}])
+
+        assert len(events) == 1
+        assert hint is None
+
+    def test_an_empty_but_working_google_is_not_an_error(self, monkeypatch):
+        events, hint = self._merge(monkeypatch)
+
+        assert events == []
+        assert hint is None

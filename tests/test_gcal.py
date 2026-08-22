@@ -320,3 +320,76 @@ def test_a_gap_exactly_at_the_threshold_counts():
     day = a_day(timed('A', '2026-08-24T08:45:00', '2026-08-24T17:00:00'))
 
     assert gcal.usable_gaps(day) == [(time(8), time(8, 45))]
+
+
+class TestSources:
+    """Two calendars, one day. The merge is the whole point."""
+
+    def test_an_event_carries_its_source_through_parsing(self):
+        events = [
+            {
+                'summary': 'Standup',
+                'start': {'dateTime': '2026-08-24T09:00:00'},
+                'end': {'dateTime': '2026-08-24T10:00:00'},
+                '_source': 'work',
+            }
+        ]
+
+        day = gcal.group_days(events, start=MON, num_days=1)[0]
+
+        assert day.events[0].source == 'work'
+
+    def test_an_event_with_no_source_is_unmarked(self):
+        day = gcal.group_days(
+            [timed('A', '2026-08-24T09:00:00', '2026-08-24T10:00:00')],
+            start=MON,
+            num_days=1,
+        )[0]
+
+        assert day.events[0].source == ''
+
+    def test_both_calendars_land_on_the_same_day(self):
+        events = [
+            timed('Personal', '2026-08-24T09:00:00', '2026-08-24T10:00:00'),
+            {
+                'summary': 'Busy',
+                'start': {'dateTime': '2026-08-24T14:00:00'},
+                'end': {'dateTime': '2026-08-24T15:00:00'},
+                '_source': 'work',
+            },
+        ]
+
+        day = gcal.group_days(events, start=MON, num_days=1)[0]
+
+        assert len(day.events) == 2
+        assert day.total_hours == pytest.approx(2.0)
+
+    def test_work_time_shrinks_the_free_spans(self):
+        """The reason this exists: work blocks were invisible before."""
+        work = {
+            'summary': 'Busy',
+            'start': {'dateTime': '2026-08-24T09:00:00'},
+            'end': {'dateTime': '2026-08-24T16:00:00'},
+            '_source': 'work',
+        }
+
+        day = gcal.group_days(
+            [work], start=MON, num_days=1, day_start=time(8), day_end=time(17)
+        )[0]
+
+        assert day.free_spans == [(time(8), time(9)), (time(16), time(17))]
+
+    def test_an_overlap_across_sources_is_still_a_conflict(self):
+        events = [
+            timed('Personal', '2026-08-24T09:00:00', '2026-08-24T10:00:00'),
+            {
+                'summary': 'Busy',
+                'start': {'dateTime': '2026-08-24T09:30:00'},
+                'end': {'dateTime': '2026-08-24T10:30:00'},
+                '_source': 'work',
+            },
+        ]
+
+        day = gcal.group_days(events, start=MON, num_days=1)[0]
+
+        assert day.conflicts == 1

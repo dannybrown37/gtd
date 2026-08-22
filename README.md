@@ -203,6 +203,48 @@ An older fzf-driven menu predating the TUI, kept for anyone who prefers it:
 | View | Filter by context |
 <!-- END MENU -->
 
+## Calendar
+
+The **Calendar** tab shows your week, the free gaps in it, and the next steps
+due on each day. Next Steps carries a one-line summary of today's load. Both
+are optional — with no calendar configured, the tab shows a hint and the
+ribbon simply doesn't appear.
+
+Two sources, merged into the same days:
+
+**Google Calendar** — read through [`gfunk`](https://github.com/dannybrown37/gfunk),
+which owns the OAuth token. GTD holds no Google credentials of its own.
+
+```bash
+gfunk mount-up --with-calendar     # one-off, opt-in, read-only scope
+```
+
+**Subscribed `.ics` feeds** — for calendars Google won't subscribe to, such as
+a published Outlook/Exchange feed.
+
+```bash
+export GTD_ICS_URL='https://outlook.office365.com/owa/calendar/.../calendar.ics'
+export GTD_ICS_URL='https://one.example/a.ics,https://two.example/b.ics'  # or several
+```
+
+> **The feed URL is a password.** Anyone holding it can read that calendar
+> indefinitely, with no sign-in. Keep it in your environment or
+> `~/.config/gtd/config.json` (`ics_url`) — never in a repo.
+
+Published feeds are usually privacy-stripped: Exchange sends `Busy` /
+`Tentative` / `Free` / `Away` with no real subject. That is enough to find the
+holes in your day, which is what the tab is for. Blocks are marked ▪ work and
+▫ personal so you can tell which calendar owns them.
+
+Tuning, all optional:
+
+| Setting | Default | What it does |
+|---|---|---|
+| `GTD_ICS_URL` | — | Subscribed feed URL(s), comma-separated |
+| `calendar_day_start` | `08:00` | Start of the window free time is measured in |
+| `calendar_day_end` | `20:00` | End of that window |
+| `GTD_GFUNK_BIN` | `gfunk` on PATH | Where the `gfunk` binary lives |
+
 ## HTTP API
 
 A small Flask app (`gtd api`) exposes GTD operations over HTTP, primarily so
@@ -296,6 +338,7 @@ src/gtd/
 ├── clipboard.py    # Write text to the system clipboard.
 ├── gcal.py         # Google Calendar, read-only, borrowed from `gfunk`.
 ├── gtd_tui.py      # Unified GTD TUI.
+├── ics.py          # Subscribed iCalendar feeds — the work calendar Google can't see.
 ├── storage.py      # Storage for weekly review state and habit dates.
 ├── tui.py          # Shared Textual widgets and modals for the GTD TUI.
 ├── ui.py           # fzf helpers, prompts, and formatting shared across CLI commands.

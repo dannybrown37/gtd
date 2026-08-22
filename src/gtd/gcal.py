@@ -40,6 +40,7 @@ __all__ = [
     'group_days',
     'largest_gap',
     'load_label',
+    'merged_events',
     'usable_gaps',
     'working_hours',
 ]
@@ -112,6 +113,9 @@ class CalEvent:
     start: datetime
     end: datetime
     location: str = ''
+    # Which calendar it came from — '' for the primary Google one,
+    # `ics.SOURCE_LABEL` for a subscribed feed.
+    source: str = ''
 
     @property
     def minutes(self) -> int:
@@ -157,6 +161,7 @@ def _parse_event(event: dict) -> CalEvent | None:
         start=start,
         end=max(start, end),
         location=event.get('location') or '',
+        source=event.get('_source') or '',
     )
 
 
@@ -373,6 +378,33 @@ def fetch_events(
         msg = f'Calendar returned something unreadable from `{binary}`'
         raise CalendarUnavailableError(msg)
     return payload
+
+
+def merged_events(
+    *, days: int = 7, since_days: int = 0
+) -> tuple[list[dict], str | None]:
+    """Google plus every subscribed feed, in one list.
+
+    Returns `(events, hint)`. The hint is set when Google specifically
+    could not be read but a subscribed feed could — a machine with no
+    `gfunk` should still show the work calendar rather than nothing, and
+    the reason wants saying somewhere.
+
+    Raises `CalendarUnavailableError` only when there is nothing at all
+    to show.
+    """
+    from gtd import ics
+
+    subscribed = ics.fetch_events(days=days, since_days=since_days)
+
+    try:
+        primary = fetch_events(days=days, since_days=since_days)
+    except CalendarUnavailableError as exc:
+        if not subscribed:
+            raise
+        return subscribed, exc.hint
+
+    return [*primary, *subscribed], None
 
 
 def _hint_for(stderr: str) -> str:

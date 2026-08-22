@@ -203,6 +203,54 @@ class TestEntriesOn:
         assert entries_on([an_entry()], MON) == []
 
 
+class TestSourceMarker:
+    """Work and personal blocks must be tellable apart at a glance."""
+
+    def _work(self, start, end) -> dict:
+        return {
+            'summary': 'Busy',
+            'start': {'dateTime': f'2026-08-24T{start}'},
+            'end': {'dateTime': f'2026-08-24T{end}'},
+            '_source': 'work',
+        }
+
+    def test_a_work_block_is_marked(self):
+        day = a_day(self._work('09:00:00', '10:00:00'))
+
+        detail = render_day_detail(day, [])
+
+        assert '[blue]▪[/blue]' in detail
+
+    def test_a_personal_block_is_marked_differently(self):
+        day = a_day(timed('Gym', '2026-08-24T09:00:00', '2026-08-24T10:00:00'))
+
+        detail = render_day_detail(day, [])
+
+        assert '[dim]▫[/dim]' in detail
+
+    def test_a_mixed_day_explains_the_marks(self):
+        day = a_day(
+            timed('Gym', '2026-08-24T07:00:00', '2026-08-24T08:00:00'),
+            self._work('09:00:00', '10:00:00'),
+        )
+
+        detail = render_day_detail(day, [])
+
+        assert 'work' in detail
+        assert 'personal' in detail
+
+    def test_a_personal_only_day_needs_no_legend(self):
+        day = a_day(timed('Gym', '2026-08-24T09:00:00', '2026-08-24T10:00:00'))
+
+        assert 'personal' not in render_day_detail(day, [])
+
+    def test_work_time_is_counted_in_the_days_load(self):
+        day = a_day(self._work('09:00:00', '13:00:00'))
+
+        assert day.total_hours == 4.0
+        assert day.load == 'moderate'
+
+
 class TestMounted:
     """Behaviour that only exists once the widget is on screen."""
 

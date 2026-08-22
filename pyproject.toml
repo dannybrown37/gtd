@@ -5,7 +5,7 @@ description = "GTD + 12-Week Year CLI powered by Notion"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.12"
-dependencies = ["click>=8.1.0", "httpx>=0.28.0", "iterfzf>=1.9.0", "pydantic>=2.13.4", "python-dateutil>=2.9.0.post0", "textual>=0.71.0"]
+dependencies = ["click>=8.1.0", "httpx>=0.28.0", "icalendar>=7.3.0", "iterfzf>=1.9.0", "pydantic>=2.13.4", "python-dateutil>=2.9.0.post0", "recurring-ical-events>=3.8.2", "textual>=0.71.0"]
 
 [project.urls]
 Repository = "https://github.com/dannybrown37/gtd"
@@ -30,6 +30,12 @@ files = ["src"]
 # silently stop reporting the mistakes mypy is here to catch.
 [[tool.mypy.overrides]]
 module = ["iterfzf"]
+ignore_missing_imports = true
+
+# `recurring_ical_events` ships no py.typed. Scoped to that one module so
+# the rest of the calendar code keeps being type-checked properly.
+[[tool.mypy.overrides]]
+module = ["recurring_ical_events"]
 ignore_missing_imports = true
 
 
