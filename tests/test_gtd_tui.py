@@ -1684,3 +1684,29 @@ class TestWeeklyReviewFlowSeedsRealEntries:
 
         assert captured['screen']._inbox_entries == []  # noqa: SLF001
         assert captured['screen']._inbox_count == 0  # noqa: SLF001
+
+
+@pytest.mark.parametrize(
+    ('now', 'label', 'expected'),
+    [
+        ('2026-08-22', 'Tomorrow', '2026-08-23'),
+        ('2026-08-22', 'In 3 days', '2026-08-25'),
+        ('2026-08-22', 'Next Monday', '2026-08-24'),
+        ('2026-08-22', 'Next week', '2026-08-29'),
+        ('2026-08-24', 'Next Monday', '2026-08-31'),
+    ],
+)
+def test_snooze_choices_match_the_webapp(
+    now: str, label: str, expected: str
+) -> None:
+    """Same four options the webapp snooze modal offers."""
+    from gtd.gtd_tui import _snooze_choices
+
+    choices = _snooze_choices(datetime.strptime(now, '%Y-%m-%d'))
+    assert list(choices) == [
+        'Tomorrow',
+        'In 3 days',
+        'Next Monday',
+        'Next week',
+    ]
+    assert choices[label] == expected

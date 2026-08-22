@@ -2402,6 +2402,22 @@ class WeeklyReviewScreen(ModalScreen[bool]):
 # ── Next Steps content ───────────────────────────────────────────────────────
 
 
+def _snooze_choices(today: datetime | None = None) -> dict[str, str]:
+    """Label → YYYY-MM-DD, mirroring the webapp snooze modal."""
+    now = today or datetime.now()
+
+    def plus(days: int) -> str:
+        return (now + timedelta(days=days)).strftime('%Y-%m-%d')
+
+    to_monday = (7 - now.weekday()) or 7
+    return {
+        'Tomorrow': plus(1),
+        'In 3 days': plus(3),
+        'Next Monday': plus(to_monday),
+        'Next week': plus(7),
+    }
+
+
 class NextStepsContent(BaseEntryContent):
     """Today's actionable items — the GTD daily driver."""
 
@@ -2410,8 +2426,7 @@ class NextStepsContent(BaseEntryContent):
 
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding('W', 'complete_habit', 'Complete'),
-        Binding('T', 'wait_tomorrow', 'Tomorrow'),
-        Binding('S', 'edit_steps', 'Steps'),
+        Binding('S', 'snooze_entry', 'Snooze'),
         Binding('N', 'edit_notes', 'Notes'),
         Binding('D', 'mark_done', 'Done'),
         Binding('U', 'update_entry', 'Update'),
@@ -2419,8 +2434,7 @@ class NextStepsContent(BaseEntryContent):
     ]
 
     _GTD_ACTIONS: ClassVar[set[str]] = {
-        'wait_tomorrow',
-        'edit_steps',
+        'snooze_entry',
         'update_entry',
         'edit_notes',
         'mark_done',
@@ -2601,32 +2615,32 @@ class NextStepsContent(BaseEntryContent):
         self.app.refresh_bindings()
         self.app.notify(f'✓ {item.habit_label} done for this week')
 
-    async def action_wait_tomorrow(self) -> None:
-        entry = self._current_entry()
-        if not entry:
-            return
-        tomorrow = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
-        self._snooze_worker(entry.page_id, tomorrow)
-        self._remove_entry_and_refocus(entry.page_id)
-        self.app.notify(f'✓ "{entry.header.strip()}" → {tomorrow}')
-
     @work
-    async def action_edit_steps(self) -> None:
+    async def action_snooze_entry(self) -> None:
         entry = self._current_entry()
         if not entry:
             return
-        val = await _open_steps_editor(
-            self.app, initial_text=entry.next_step or ''
+        choices = _snooze_choices()
+        picked = await self.app.push_screen_wait(
+            SelectModal(
+                'Snooze until',
+                list(choices),
+                allow_new=True,
+            )
         )
-        if val is None:
+        if not picked:
             return
-        self._update_worker(
-            entry.page_id,
-            {'next_step': val},
-        )
-        entry.next_step = val
-        self._update_detail()
-        self.app.notify('✓ Steps updated')
+        date = choices.get(picked)
+        if not date:
+            from gtd.notion.entries import _parse_date_input
+
+            date = _parse_date_input(picked)
+        if not date:
+            self.app.notify('Could not parse date', severity='warning')
+            return
+        self._snooze_worker(entry.page_id, date)
+        self._remove_entry_and_refocus(entry.page_id)
+        self.app.notify(f'✓ "{entry.header.strip()}" → {date}')
 
     @work(thread=True)
     def _snooze_worker(self, page_id: str, date: str) -> None:

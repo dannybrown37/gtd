@@ -318,7 +318,7 @@ def test_snooze_defaults_to_tomorrow(
     auth_header: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Mirrors the TUI's `T` (wait_tomorrow) binding."""
+    """Mirrors the TUI's `S` (snooze_entry) binding."""
     monkeypatch.setattr(api, '_today_iso', lambda: '2026-08-06')
     update = MagicMock()
     monkeypatch.setattr(api, 'update_page', update)

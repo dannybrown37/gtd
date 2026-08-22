@@ -9,7 +9,7 @@ const CAPABILITIES = [
   'update_entry',
   'edit_notes',
   'edit_steps',
-  'wait_tomorrow',
+  'snooze_entry',
   'mark_done',
   'drop_entry',
   'triage_entry',

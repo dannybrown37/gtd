@@ -126,7 +126,7 @@ def test_tui_only_entries_carry_a_reason() -> None:
 
 @pytest.mark.parametrize(
     'capability',
-    ['update_entry', 'edit_notes', 'wait_tomorrow', 'mark_done'],
+    ['update_entry', 'edit_notes', 'snooze_entry', 'mark_done'],
 )
 def test_core_actions_are_declared(capability: str) -> None:
     """The actions the parity work existed to deliver, pinned explicitly."""
