@@ -24,6 +24,13 @@ import httpx
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _fake_notion_db_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Provide a dummy DB ID so `get_projects_db_id` never `sys.exit`s."""
+    monkeypatch.setenv('NOTION_PROJECTS_DB_ID', 'fake-test-db-id')
+    monkeypatch.setenv('NOTION_TOKEN', 'fake-test-token')
+
+
 class NetworkAccessBlockedError(RuntimeError):
     """Raised when a test tries to make a real HTTP request."""
 
