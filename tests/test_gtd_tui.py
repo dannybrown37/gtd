@@ -1692,7 +1692,7 @@ class TestWeeklyReviewFlowSeedsRealEntries:
         ('2026-08-22', 'Tomorrow', '2026-08-23'),
         ('2026-08-22', 'In 3 days', '2026-08-25'),
         ('2026-08-22', 'Next Monday', '2026-08-24'),
-        ('2026-08-22', 'Next week', '2026-08-29'),
+        ('2026-08-22', 'In 7 days', '2026-08-29'),
         ('2026-08-24', 'Next Monday', '2026-08-31'),
     ],
 )
@@ -1705,8 +1705,8 @@ def test_snooze_choices_match_the_webapp(
     choices = _snooze_choices(datetime.strptime(now, '%Y-%m-%d'))
     assert list(choices) == [
         'Tomorrow',
-        'In 3 days',
         'Next Monday',
-        'Next week',
+        'In 3 days',
+        'In 7 days',
     ]
     assert choices[label] == expected

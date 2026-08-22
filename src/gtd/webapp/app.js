@@ -977,9 +977,9 @@ function openSnoozeModal(entry) {
     <h2>Snooze</h2>
     <div class="action-stack">
       <button class="action-btn" data-days="1">Tomorrow</button>
-      <button class="action-btn" data-days="3">In 3 days</button>
       <button class="action-btn" data-date="${nextMondayISO()}">Next Monday</button>
-      <button class="action-btn" data-days="7">Next week</button>
+      <button class="action-btn" data-days="3">In 3 days</button>
+      <button class="action-btn" data-days="7">In 7 days</button>
     </div>
     <label for="snooze-date">Or pick a date</label>
     <input id="snooze-date" type="date" value="${todayISO()}" />
@@ -1282,7 +1282,7 @@ function openRescheduleModal(entry) {
     <p class="entry-meta">Recurring — reschedule it, or finish it for good.</p>
     <div class="action-stack">
       <button class="action-btn" data-days="1">Tomorrow</button>
-      <button class="action-btn" data-days="7">Next week</button>
+      <button class="action-btn" data-days="7">In 7 days</button>
     </div>
     <label for="resched-date">Or pick a date</label>
     <input id="resched-date" type="date" value="${addDaysISO(1)}" />

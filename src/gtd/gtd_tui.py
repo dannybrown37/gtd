@@ -2412,9 +2412,9 @@ def _snooze_choices(today: datetime | None = None) -> dict[str, str]:
     to_monday = (7 - now.weekday()) or 7
     return {
         'Tomorrow': plus(1),
-        'In 3 days': plus(3),
         'Next Monday': plus(to_monday),
-        'Next week': plus(7),
+        'In 3 days': plus(3),
+        'In 7 days': plus(7),
     }
 
 
