@@ -53,7 +53,17 @@ async def _app_tab_ids() -> list[str]:
 
 @pytest.fixture(scope='module')
 def tab_ids() -> list[str]:
-    return asyncio.run(_app_tab_ids())
+    """Boot the real app once and read its tab ids.
+
+    The env fixtures in `conftest.py` are function-scoped, so they have not
+    run yet at module scope: without setting the ids here, `GTDApp()` calls
+    `get_projects_db_id`, finds nothing, and `sys.exit(1)`s on any machine
+    with no real config — which is every CI runner.
+    """
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setenv('NOTION_PROJECTS_DB_ID', 'fake-test-db-id')
+        patch.setenv('NOTION_NOTES_TOKEN', 'fake-test-token')
+        return asyncio.run(_app_tab_ids())
 
 
 @pytest.fixture(scope='module')
