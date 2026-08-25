@@ -1,5 +1,5 @@
 ---
-name: screenshots
+name: gtd-screenshots
 description: Invoke when GTD's README or docs screenshots need regenerating or fixing — "update the screenshots", "the README shows the old TUI", "add the Calendar tab to the docs images", "regenerate docs/screenshots". Drives the real TUI headlessly against a demo Notion database and writes docs/screenshots/*.svg.
 ---
 
