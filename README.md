@@ -22,6 +22,10 @@ A TUI/CLI/API for personal productivity built around [GTD (Getting Things Done)]
 <details>
 <summary>More tabs</summary>
 
+<img src="docs/screenshots/calendar.svg" alt="Calendar tab" width="800">
+
+*Calendar — a read-only two-week load view, merging Google Calendar and any subscribed .ics feeds.*
+
 <img src="docs/screenshots/inbox.svg" alt="Inbox tab" width="800">
 
 *Inbox — unprocessed captures waiting to be triaged.*
@@ -52,7 +56,7 @@ A TUI/CLI/API for personal productivity built around [GTD (Getting Things Done)]
 
 </details>
 
-*(Screenshots use fictional demo data — see `scripts/seed_demo_data.py` and `scripts/capture_screenshots.py` to regenerate them.)*
+*(Screenshots use fictional demo data, except the Calendar tab, which shows only meeting counts and busy hours — see `scripts/seed_demo_data.py` and `scripts/capture_screenshots.py` to regenerate them.)*
 
 ## Requirements
 
