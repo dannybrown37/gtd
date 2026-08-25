@@ -1,3 +1,14 @@
+## v0.13.0 (2026-08-25)
+
+### Feat
+
+- capture screenshots skill + script
+
+### Fix
+
+- debug CI
+- rename to gtd-screenshots for value; update docs screenshot
+
 ## v0.12.0 (2026-08-22)
 
 ### Feat
