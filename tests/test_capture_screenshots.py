@@ -14,7 +14,7 @@ import importlib.util
 import re
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Never
 
 import pytest
 
@@ -44,6 +44,33 @@ def _load_capture() -> ModuleType:
 capture = _load_capture()
 
 
+def _stub_loaders(patch: pytest.MonkeyPatch) -> None:
+    """Give the booted app nothing to load.
+
+    `conftest.py`'s network and calendar guards are function-scoped, so
+    they are not in force here. Without this the tabs' background workers
+    reach real Notion, and the error path they take on a 401 queries
+    `#entry-list` before the tab has mounted it — a `WorkerFailed` that
+    fails whichever test happened to trigger the fixture.
+    """
+    from gtd import gcal
+    from gtd.notion import views
+
+    for name in (
+        'next_steps_entries',
+        'inbox_entries',
+        'entries_for_status',
+        'searchable_entries',
+    ):
+        patch.setattr(views, name, lambda *_a, **_kw: [])
+
+    def _no_calendar(*_a: object, **_kw: object) -> Never:
+        msg = 'no calendar in tests'
+        raise gcal.CalendarUnavailableError(msg)
+
+    patch.setattr(gcal, 'merged_events', _no_calendar)
+
+
 async def _app_tab_ids() -> list[str]:
     app = GTDApp()
     async with app.run_test(size=(130, 45)):
@@ -63,6 +90,7 @@ def tab_ids() -> list[str]:
     with pytest.MonkeyPatch.context() as patch:
         patch.setenv('NOTION_PROJECTS_DB_ID', 'fake-test-db-id')
         patch.setenv('NOTION_NOTES_TOKEN', 'fake-test-token')
+        _stub_loaders(patch)
         return asyncio.run(_app_tab_ids())
 
 
