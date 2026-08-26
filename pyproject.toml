@@ -1,6 +1,6 @@
 [project]
 name = "gtd-tui"
-version = "0.13.0"
+version = "0.13.1"
 description = "GTD + 12-Week Year CLI powered by Notion"
 readme = "README.md"
 license = "MIT"

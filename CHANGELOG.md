@@ -1,3 +1,10 @@
+## v0.13.1 (2026-08-26)
+
+### Fix
+
+- debug CI with stub loaders
+- pytest-xdist for 3x speedup of test suite
+
 ## v0.13.0 (2026-08-25)
 
 ### Feat
