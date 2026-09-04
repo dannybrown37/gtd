@@ -6,7 +6,7 @@ repos:
   # test hook, by recovering it from git's argv -- the commitizen hook below
   # runs in a separate git invocation and can only ever fail after the suite.
   - repo: https://github.com/dannybrown37/git-a-grip
-    rev: v0.11.1
+    rev: v0.12.1
     hooks:
       - id: commitizen-early
         fail_fast: true

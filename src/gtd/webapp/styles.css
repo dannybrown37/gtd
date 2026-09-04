@@ -393,6 +393,7 @@ button[type=submit], .primary-btn {
   font-size: 0.95rem;
   font-weight: 600;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+  touch-action: none;
 }
 
 .nav-fab-icon {

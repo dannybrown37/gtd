@@ -303,10 +303,61 @@ function closeNav() {
   navFab.focus();
 }
 
+let fabDragged = false;
+
 navFab.addEventListener('click', () => {
+  if (fabDragged) {
+    fabDragged = false;
+    return;
+  }
   if (navBackdrop.classList.contains('hidden')) openNav();
   else closeNav();
 });
+
+// Draggable pill — repositioning is a convenience, not a preference, so it is
+// session-only and resets to the default corner on reload. A short move
+// threshold keeps a plain tap from being swallowed as a drag.
+(() => {
+  const DRAG_THRESHOLD = 6;
+  let dragging = false;
+  let startX = 0;
+  let startY = 0;
+  let startLeft = 0;
+  let startTop = 0;
+
+  navFab.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    dragging = true;
+    fabDragged = false;
+    const rect = navFab.getBoundingClientRect();
+    startX = e.clientX;
+    startY = e.clientY;
+    startLeft = rect.left;
+    startTop = rect.top;
+    navFab.setPointerCapture(e.pointerId);
+  });
+
+  navFab.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    const dx = e.clientX - startX;
+    const dy = e.clientY - startY;
+    if (!fabDragged && Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
+    fabDragged = true;
+    const rect = navFab.getBoundingClientRect();
+    const maxLeft = window.innerWidth - rect.width;
+    const maxTop = window.innerHeight - rect.height;
+    navFab.style.left = `${Math.min(Math.max(startLeft + dx, 0), maxLeft)}px`;
+    navFab.style.top = `${Math.min(Math.max(startTop + dy, 0), maxTop)}px`;
+    navFab.style.right = 'auto';
+    navFab.style.bottom = 'auto';
+  });
+
+  const endDrag = () => {
+    dragging = false;
+  };
+  navFab.addEventListener('pointerup', endDrag);
+  navFab.addEventListener('pointercancel', endDrag);
+})();
 
 // Anything that isn't a view button dismisses — the scrim, the sheet's own
 // padding, the version line. Only .nav-item is interactive in here, so a
