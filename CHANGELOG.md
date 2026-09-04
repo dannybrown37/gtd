@@ -1,3 +1,9 @@
+## v0.13.2 (2026-09-04)
+
+### Fix
+
+- update git-a-grip, allow pill dragging in PWA
+
 ## v0.13.1 (2026-08-26)
 
 ### Fix
