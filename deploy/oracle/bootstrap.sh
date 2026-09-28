@@ -31,7 +31,6 @@ export PATH="$HOME/.local/bin:$PATH"
 echo "==> Installing gtd-tui[api]"
 uv tool install "gtd-tui[api]"
 
-GTD_BIN="$(uv tool dir)/gtd-tui/bin/gtd"
 if [ ! -x "$HOME/.local/bin/gtd" ]; then
   echo "Warning: expected gtd at ~/.local/bin/gtd, check 'uv tool list' output." >&2
 fi

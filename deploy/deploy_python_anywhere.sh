@@ -1,6 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
+# shellcheck source=/dev/null
 [[ -f "${HOME}/.env" ]] && { set -a; source "${HOME}/.env"; set +a; }
 
 PA_USERNAME="${PA_USERNAME:?set PA_USERNAME}"

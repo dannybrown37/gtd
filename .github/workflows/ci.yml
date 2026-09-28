@@ -5,14 +5,19 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v9.0.0
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
 
       - name: Install ruff and pre-commit
         run: |
@@ -29,10 +34,12 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v9.0.0
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
 
       - name: Run tests
         run: uv run --extra api pytest --cov=src --cov-report=term-missing tests/
@@ -44,13 +51,15 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v7
+      # The release deploy key is the only actor the `main` ruleset lets push
+      # directly. Credentials must persist: the last step pushes the bump.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 # zizmor: ignore[artipacked]
         with:
           fetch-depth: 0
-          token: ${{ secrets.BUMP_TOKEN }}
+          ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v9.0.0
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
 
       - name: Configure git identity
         run: |
@@ -85,4 +94,6 @@ jobs:
         if: steps.cz.outputs.bumped == 'true'
         # cz bump creates a lightweight tag, so --follow-tags (annotated-only)
         # wouldn't push it — push tags explicitly instead.
-        run: git push origin "HEAD:${{ github.ref_name }}" --tags
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: git push origin "HEAD:$REF_NAME" --tags

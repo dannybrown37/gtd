@@ -15,11 +15,12 @@ repos:
       - id: pytest
         args: ['--runner=uv run --extra api pytest', tests/, -q]
       - id: block-private-terms
+      - id: zizmor
       # The runner installs mypy itself; the stub package is the one thing
       # `--with mypy` cannot know it needs.
       - id: mypy
         args:
-          - '--runner=uv run --with mypy --with types-python-dateutil mypy'
+          - '--runner=uv run --extra api --with mypy --with types-python-dateutil mypy'
 
   - repo: https://github.com/commitizen-tools/commitizen
     rev: v4.16.5
@@ -45,6 +46,11 @@ repos:
     hooks:
       - id: shfmt
         args: ["-i", "4"]
+
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.11.0.1
+    hooks:
+      - id: shellcheck
 
   - repo: https://github.com/gitleaks/gitleaks
     rev: v8.30.1
