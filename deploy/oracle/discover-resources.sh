@@ -13,17 +13,17 @@ if ! command -v oci >/dev/null 2>&1; then
   export PATH="$HOME/bin:$PATH"
 fi
 
-AUTH="--auth instance_principal"
+AUTH=(--auth instance_principal)
 INSTANCE_ID=$(curl -fsSL -H "Authorization: Bearer Oracle" http://169.254.169.254/opc/v2/instance/ | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
-COMPARTMENT_ID=$(oci compute instance get $AUTH --instance-id "$INSTANCE_ID" --query 'data."compartment-id"' --raw-output)
+COMPARTMENT_ID=$(oci compute instance get "${AUTH[@]}" --instance-id "$INSTANCE_ID" --query 'data."compartment-id"' --raw-output)
 
-VNIC_ID=$(oci compute instance list-vnics $AUTH --instance-id "$INSTANCE_ID" --compartment-id "$COMPARTMENT_ID" --query 'data[0].id' --raw-output)
-SUBNET_ID=$(oci network vnic get $AUTH --vnic-id "$VNIC_ID" --query 'data."subnet-id"' --raw-output)
-SUBNET_INFO=$(oci network subnet get $AUTH --subnet-id "$SUBNET_ID")
+VNIC_ID=$(oci compute instance list-vnics "${AUTH[@]}" --instance-id "$INSTANCE_ID" --compartment-id "$COMPARTMENT_ID" --query 'data[0].id' --raw-output)
+SUBNET_ID=$(oci network vnic get "${AUTH[@]}" --vnic-id "$VNIC_ID" --query 'data."subnet-id"' --raw-output)
+SUBNET_INFO=$(oci network subnet get "${AUTH[@]}" --subnet-id "$SUBNET_ID")
 VCN_ID=$(echo "$SUBNET_INFO" | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['vcn-id'])")
 ROUTE_TABLE_ID=$(echo "$SUBNET_INFO" | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['route-table-id'])")
 SECURITY_LIST_ID=$(echo "$SUBNET_INFO" | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['security-list-ids'][0])")
-IGW_ID=$(oci network internet-gateway list $AUTH --compartment-id "$COMPARTMENT_ID" --vcn-id "$VCN_ID" --query 'data[0].id' --raw-output)
+IGW_ID=$(oci network internet-gateway list "${AUTH[@]}" --compartment-id "$COMPARTMENT_ID" --vcn-id "$VCN_ID" --query 'data[0].id' --raw-output)
 
 cat <<EOF
 

@@ -27,9 +27,10 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     environment: oci
+    permissions: {}
     steps:
       - name: Join tailnet
-        uses: tailscale/github-action@v3
+        uses: tailscale/github-action@84a3f23bb4d843bcf4da6cf824ec1be473daf4de # v3.2.3
         with:
           oauth-client-id: ${{ secrets.TAILSCALE_OAUTH_CLIENT_ID }}
           oauth-secret: ${{ secrets.TAILSCALE_OAUTH_CLIENT_SECRET }}
