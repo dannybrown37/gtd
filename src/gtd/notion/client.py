@@ -382,6 +382,13 @@ def rename_context(old_name: str, new_name: str) -> None:
         update_page(page['id'], props)
 
 
+def get_page(page_id: str) -> dict:
+    """Retrieve a single Notion page."""
+    response = _get(f'{NOTION_API_URL}/pages/{page_id}')
+    _handle_response(response)
+    return response.json()
+
+
 def update_page(page_id: str, properties: dict) -> dict:
     """Update a Notion page's properties."""
     url = f'{NOTION_API_URL}/pages/{page_id}'

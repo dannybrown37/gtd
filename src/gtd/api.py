@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from http import HTTPStatus
+import hmac
 import os
 from dataclasses import asdict
 from datetime import datetime, timedelta
@@ -20,12 +20,14 @@ from dateutil import parser as dateparser
 
 from gtd.notion.capture import _create_page
 from gtd.notion.client import (
+    NotionAPIError,
     add_area,
     add_list_category,
     build_property_update,
     get_areas,
     get_contexts,
     get_list_categories,
+    get_page,
     get_page_body,
     query_database,
     remove_area,
@@ -54,9 +56,6 @@ import logging
 # Response and not the dict it is built from -- the annotations said
 # `tuple[dict, int]` and were simply describing the wrong object.
 _ErrorResponse = tuple[Response, int]
-
-NOTION_API_URL = 'https://api.notion.com/v1'
-NOTION_API_VERSION = '2022-06-28'
 
 EXCLUDE_THESE = [  # attributes not currently ever needed in iOS Shortcuts
     'created_date',
@@ -110,7 +109,9 @@ def require_auth(fn: Callable) -> Callable:
                 headers_preview,
                 body_text,
             )
-        if not auth.startswith('Bearer ') or auth[7:] != expected:
+        if not auth.startswith('Bearer ') or not hmac.compare_digest(
+            auth[7:].encode(), expected.encode()
+        ):
             logger.warning(
                 'Authorization failed for request to %s', request.path
             )
@@ -138,21 +139,12 @@ def _today_iso() -> str:
 
 
 def _get_page_by_id(page_id: str) -> dict | None:
-    """Retrieve a Notion page by ID and return as ProjectEntry dict."""
-    url = f'{NOTION_API_URL}/pages/{page_id}'
-    token = os.environ.get('NOTION_NOTES_TOKEN', '')
-    headers = {
-        'Authorization': f'Bearer {token}',
-        'Content-Type': 'application/json',
-        'Notion-Version': NOTION_API_VERSION,
-    }
+    """The raw Notion page, or None if it can't be fetched for any reason."""
     try:
-        response = httpx.get(url, headers=headers, timeout=30.0)
-        if response.status_code == HTTPStatus.OK:
-            return response.json()
-    except Exception:
-        print(f'Failed to retrieve page {page_id}, response: {response.text}')
-    return None
+        return get_page(page_id)
+    except (NotionAPIError, httpx.HTTPError):
+        logger.warning('Failed to retrieve page %s', page_id, exc_info=True)
+        return None
 
 
 def _page_entry(page: dict) -> ProjectEntry | None:

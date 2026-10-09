@@ -35,6 +35,11 @@ jobs:
           oauth-client-id: ${{ secrets.TAILSCALE_OAUTH_CLIENT_ID }}
           oauth-secret: ${{ secrets.TAILSCALE_OAUTH_CLIENT_SECRET }}
           tags: tag:ci
+          # Keep the runner on GitHub's own DNS. The tailnet's nameserver is
+          # a home AdGuard box that `tag:ci` cannot reach, so accepting it
+          # would break every lookup on the runner. `tailscale ssh` still
+          # finds the VM: tailscaled resolves tailnet names itself.
+          args: --accept-dns=false
 
       - name: Check the VM is reachable
         env:
