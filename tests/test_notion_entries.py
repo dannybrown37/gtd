@@ -13,7 +13,6 @@ import pytest
 from gtd.notion.entries import (
     _collect_field_updates,
     _entry_preview_text,
-    _escape_for_shell,
 )
 from gtd.notion.models import ProjectEntry
 
@@ -31,28 +30,6 @@ def _entry(**overrides) -> ProjectEntry:
         'created_date': '2026-06-01',
     }
     return ProjectEntry(**{**defaults, **overrides})
-
-
-# --- _escape_for_shell: preview text is interpolated into `echo '...'` ---
-
-
-class TestEscapeForShell:
-    @pytest.mark.parametrize(
-        ('raw', 'expected'),
-        [
-            ('no quotes', 'no quotes'),
-            ("it's", "it'\\''s"),
-            ("'leading", "'\\''leading"),
-            ("two's quote's", "two'\\''s quote'\\''s"),
-            ('', ''),
-        ],
-    )
-    def test_single_quotes_are_escaped(self, raw: str, expected: str):
-        assert _escape_for_shell(raw) == expected
-
-    def test_double_quotes_and_backslashes_pass_through(self):
-        """Only single quotes matter inside a single-quoted shell string."""
-        assert _escape_for_shell(r'say "hi" \n') == r'say "hi" \n'
 
 
 # --- _entry_preview_text: the fzf preview pane ---

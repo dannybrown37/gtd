@@ -57,11 +57,6 @@ def _parse_date_input(raw: str) -> str | None:
     return None
 
 
-def _escape_for_shell(text: str) -> str:
-    """Escape text for use in single-quoted shell strings."""
-    return text.replace("'", "'\\''")
-
-
 def _entry_preview_text(
     entry: ProjectEntry,
     body: str = '',
@@ -289,7 +284,7 @@ def _collect_field_updates(  # noqa: C901, PLR0912
 def _edit_entry_fields(entry: ProjectEntry) -> None:
     """Prompt for field edits and push to Notion."""
     body = get_page_body(entry.page_id)
-    preview = _escape_for_shell(_entry_preview_text(entry, body))
+    preview = _entry_preview_text(entry, body)
 
     fields = fzf_on_a_list(
         [
@@ -304,7 +299,7 @@ def _edit_entry_fields(entry: ProjectEntry) -> None:
         ],
         multiple=True,
         prompt=f'"{entry.header.strip()}" → Edit fields',
-        preview=f"echo '{preview}'",
+        preview_text=preview,
     )
     if not fields:
         return

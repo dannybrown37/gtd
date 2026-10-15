@@ -12,7 +12,6 @@ from gtd.notion.client import (
 from gtd.notion.entries import (
     _edit_entry_fields,
     _entry_preview_text,
-    _escape_for_shell,
     update_entry_by_ref,
 )
 from gtd.notion.log import _confirm_delete
@@ -39,9 +38,7 @@ def review_someday() -> None:  # noqa: C901
 
     for i, entry in enumerate(entries, 1):
         body = get_page_body(entry.page_id)
-        preview = _escape_for_shell(
-            _entry_preview_text(entry, body),
-        )
+        preview = _entry_preview_text(entry, body)
 
         action = fzf_on_a_list(
             [
@@ -51,7 +48,7 @@ def review_someday() -> None:  # noqa: C901
                 'Drop (archive)',
             ],
             prompt=f'[{i}/{total}] "{entry.header.strip()}"',
-            preview=f"echo '{preview}'",
+            preview_text=preview,
         )
         if not action:
             break
@@ -120,13 +117,13 @@ def _review_get_clear() -> None:
         ]
         for item in triage_items:
             summary_lines.append(f'  • {item.header.strip()}')
-        preview = _escape_for_shell('\n'.join(summary_lines))
+        preview = '\n'.join(summary_lines)
 
         print(f'  ⚠ {len(triage_items)} item(s) in Triage\n')
         action = fzf_on_a_list(
             ['Process triage now', 'Skip for now'],
             prompt='Inbox',
-            preview=f"echo '{preview}'",
+            preview_text=preview,
         )
         if action == 'Process triage now':
             process_triage()
@@ -158,7 +155,7 @@ def _review_get_current() -> None:  # noqa: C901, PLR0912, PLR0915
         updated = 0
         for i, entry in enumerate(current_entries, 1):
             body = get_page_body(entry.page_id)
-            preview = _escape_for_shell(_entry_preview_text(entry, body))
+            preview = _entry_preview_text(entry, body)
 
             action = fzf_on_a_list(
                 [
@@ -168,7 +165,7 @@ def _review_get_current() -> None:  # noqa: C901, PLR0912, PLR0915
                     'Move to Someday/Maybe',
                 ],
                 prompt=f'[{i}/{total}] {entry.header.strip()}',
-                preview=f"echo '{preview}'",
+                preview_text=preview,
             )
             if not action:
                 break
@@ -210,13 +207,13 @@ def _review_get_current() -> None:  # noqa: C901, PLR0912, PLR0915
         for entry in someday_entries:
             ctx = f' [{entry.context}]' if entry.context else ''
             summary_lines.append(f'  • {entry.header.strip()}{ctx}')
-        preview = _escape_for_shell('\n'.join(summary_lines))
+        preview = '\n'.join(summary_lines)
 
         print(f'  {len(someday_entries)} Someday/Maybe item(s)\n')
         action = fzf_on_a_list(
             ['Review now', 'Skip for now'],
             prompt='Someday/Maybe',
-            preview=f"echo '{preview}'",
+            preview_text=preview,
         )
         if action == 'Review now':
             review_someday()

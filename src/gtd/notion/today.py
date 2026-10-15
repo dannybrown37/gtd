@@ -14,7 +14,6 @@ from gtd.notion.client import (
 from gtd.notion.entries import (
     _edit_entry_fields,
     _entry_preview_text,
-    _escape_for_shell,
     _parse_date_input,
     select_entry,
 )
@@ -41,7 +40,7 @@ def list_today() -> None:  # noqa: C901, PLR0912
             break
 
         body = get_page_body(entry.page_id)
-        preview = _escape_for_shell(_entry_preview_text(entry, body))
+        preview = _entry_preview_text(entry, body)
 
         action = fzf_on_a_list(
             [
@@ -53,7 +52,7 @@ def list_today() -> None:  # noqa: C901, PLR0912
                 'Back to list',
             ],
             prompt=f'"{entry.header.strip()}"',
-            preview=f"echo '{preview}'",
+            preview_text=preview,
         )
         if not action or action == 'Back to list':
             continue

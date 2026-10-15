@@ -1,6 +1,15 @@
+import subprocess
 from unittest.mock import patch, MagicMock
 
-from gtd.ui import CancelAction, fzf_on_a_list, prompt_input, pause
+import pytest
+
+from gtd.ui import (
+    PREVIEW_ENV_VAR,
+    CancelAction,
+    fzf_on_a_list,
+    pause,
+    prompt_input,
+)
 
 
 class TestPromptInputCtrlC:
@@ -43,3 +52,43 @@ class TestFzfCtrlC:
         mock_run.return_value = MagicMock(returncode=0, stdout='b\n')
         result = fzf_on_a_list(['a', 'b'], prompt='test')
         assert result == 'b'
+
+
+HOSTILE_TEXT = [
+    'Buy milk $(id -un) {fzf:prompt}',
+    "it's `whoami` {} {q} {+}",
+    "'; touch /tmp/pwned; echo '",
+    'line one\nline two $HOME',
+]
+
+
+class TestFzfPreviewText:
+    @pytest.mark.parametrize('text', HOSTILE_TEXT)
+    @patch('gtd.ui.subprocess.run')
+    def test_preview_text_never_enters_argv(self, mock_run, text: str):
+        """Item text reaches the preview through the environment only.
+
+        fzf expands placeholders in --preview before `sh -c`.
+        """
+        mock_run.return_value = MagicMock(returncode=0, stdout='a\n')
+        fzf_on_a_list(['a'], prompt='p', preview_text=text)
+        argv = mock_run.call_args.args[0]
+        assert all(text not in arg for arg in argv)
+        assert mock_run.call_args.kwargs['env'][PREVIEW_ENV_VAR] == text
+
+    @pytest.mark.parametrize('text', HOSTILE_TEXT)
+    def test_preview_command_prints_text_literally(self, text: str):
+        with patch('gtd.ui.subprocess.run') as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout='a\n')
+            fzf_on_a_list(['a'], prompt='p', preview_text=text)
+            argv = mock_run.call_args.args[0]
+        template = argv[argv.index('--preview') + 1]
+        assert '{' not in template
+        shown = subprocess.run(  # noqa: S603
+            ['/bin/sh', '-c', template],
+            env={PREVIEW_ENV_VAR: text},
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        assert shown.stdout == f'{text}\n'
