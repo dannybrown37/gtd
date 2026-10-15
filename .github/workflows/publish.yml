@@ -52,5 +52,8 @@ jobs:
     needs: publish
     permissions: {}
     uses: $/.github/workflows/deploy.yml
+    # Without inherit, the called job gets empty `oci` environment secrets
+    # (v0.13.3 and v0.13.4 deploys failed with "OAuth identity empty").
+    secrets: inherit # zizmor: ignore[secrets-inherit]
     with:
       version: ${{ github.ref_name }}
