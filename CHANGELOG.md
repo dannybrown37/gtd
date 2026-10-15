@@ -1,3 +1,9 @@
+## v0.13.4 (2026-10-15)
+
+### Fix
+
+- protect against shell injection (#6)
+
 ## v0.13.3 (2026-10-09)
 
 ### Fix
