@@ -1,5 +1,6 @@
 """fzf helpers, prompts, and formatting shared across CLI commands."""
 
+import os
 import shutil
 import subprocess
 from typing import Literal, overload
@@ -7,6 +8,7 @@ from typing import Literal, overload
 from iterfzf import BUNDLED_EXECUTABLE
 
 __all__ = [
+    'PREVIEW_ENV_VAR',
     'CancelAction',
     'fzf_on_a_list',
     'pause',
@@ -21,6 +23,12 @@ FZF_CTRL_C_CODE = 130
 # works without requiring a separate fzf install.
 FZF_EXECUTABLE = shutil.which('fzf') or str(BUNDLED_EXECUTABLE)
 
+# fzf expands `{}`/`{q}`/`{fzf:prompt}` inside --preview before handing it to
+# the shell, so no quoting of item text in the template is safe. Notion text
+# reaches the preview pane through the environment instead.
+PREVIEW_ENV_VAR = 'GTD_FZF_PREVIEW'
+_PREVIEW_FROM_ENV = f'printf \'%s\\n\' "${PREVIEW_ENV_VAR}"'
+
 
 @overload
 def fzf_on_a_list(
@@ -29,6 +37,7 @@ def fzf_on_a_list(
     multiple: Literal[True],
     prompt: str = '',
     preview: str | None = None,
+    preview_text: str | None = None,
 ) -> list[str] | None: ...
 
 
@@ -39,6 +48,7 @@ def fzf_on_a_list(
     multiple: Literal[False] = False,
     prompt: str = '',
     preview: str | None = None,
+    preview_text: str | None = None,
 ) -> str | None: ...
 
 
@@ -48,8 +58,13 @@ def fzf_on_a_list(
     multiple: bool = False,
     prompt: str = '',
     preview: str | None = None,
+    preview_text: str | None = None,
 ) -> str | list[str] | None:
-    """Run fzf on a list of strings."""
+    """Run fzf on a list of strings.
+
+    `preview` is an fzf command template and must not contain item text;
+    pass static text to show in the preview pane as `preview_text`.
+    """
     prompt = f'{prompt}: ' if prompt and not prompt.endswith(': ') else prompt
     if multiple:
         cmd = [
@@ -60,6 +75,10 @@ def fzf_on_a_list(
         ]
     else:
         cmd = [FZF_EXECUTABLE, '--prompt', prompt]
+    env = None
+    if preview_text is not None:
+        preview = _PREVIEW_FROM_ENV
+        env = {**os.environ, PREVIEW_ENV_VAR: preview_text}
     if preview is not None:
         cmd.extend(['--preview', preview, '--preview-window', 'up:wrap'])
     result = subprocess.run(  # noqa: S603
@@ -68,6 +87,7 @@ def fzf_on_a_list(
         stdout=subprocess.PIPE,
         text=True,
         check=False,
+        env=env,
     )
     if result.returncode == FZF_CTRL_C_CODE:
         raise CancelAction

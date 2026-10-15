@@ -12,7 +12,6 @@ from gtd.notion.client import (
 )
 from gtd.notion.entries import (
     _entry_preview_text,
-    _escape_for_shell,
     select_entry,
 )
 from gtd.notion.models import ProjectEntry
@@ -34,7 +33,7 @@ TRIAGE_STATUSES = [s for s in ALL_STATUSES if s != 'Triage'] + ['Delete']
 def _process_single_entry(entry: ProjectEntry) -> bool:  # noqa: C901, PLR0911, PLR0912, PLR0915
     """Process one triage item. Returns True if processed, False if skipped."""
     body = get_page_body(entry.page_id)
-    preview = _escape_for_shell(_entry_preview_text(entry, body))
+    preview = _entry_preview_text(entry, body)
 
     agenda_person = agenda_person_from_header(entry.header)
 
@@ -46,7 +45,7 @@ def _process_single_entry(entry: ProjectEntry) -> bool:  # noqa: C901, PLR0911, 
         status = fzf_on_a_list(
             TRIAGE_STATUSES,
             prompt=f'"{entry.header}" → Status',
-            preview=f"echo '{preview}'",
+            preview_text=preview,
         )
         if not status:
             return False
