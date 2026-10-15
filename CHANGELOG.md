@@ -1,3 +1,9 @@
+## v0.13.5 (2026-10-15)
+
+### Fix
+
+- secrets inheritance in deploy ci (#7)
+
 ## v0.13.4 (2026-10-15)
 
 ### Fix
