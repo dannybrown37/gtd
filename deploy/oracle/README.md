@@ -1,5 +1,9 @@
 # Deploying gtd to Oracle Cloud (Always Free) + Tailscale
 
+> **Retired 2026-10-26.** gtd no longer runs on the VM: `gtd-api` is removed, and `deploy.yml`
+> and the `tag:ci` deploy path are gone. The VM now runs Tarn only, set up from Tarn's `deploy/`
+> folder. This folder stays for reference until Tarn's Terraform takes over the VM.
+
 Runs `gtd api` (which also serves the `webapp/` PWA — see the root `CLAUDE.md`) on an
 Oracle Cloud Always Free VM, reachable privately over your [Tailscale](https://tailscale.com/)
 tailnet rather than the open internet.
@@ -230,10 +234,15 @@ silently leaving a stale app running.
 
 - Uses an **ephemeral** public IP (free) since Tailscale is the actual access
   path — no need to pay for a reserved one.
-- The security list opens TCP 22 (SSH) and UDP 41641 (Tailscale direct
-  connections) to the internet; port 8000 (the API/webapp) is **not** opened
-  publicly — it's only reachable over the tailnet or via the VM's private
-  Oracle-internal IP.
+- The security list opens only UDP 41641 (Tailscale direct connections) to
+  the internet. There is no public SSH: step 2 needs a temporary TCP 22 rule
+  from your own IP (see `main.tf`); remove it once Tailscale SSH works. Port
+  8000 (the API/webapp) is only reachable over the tailnet.
+- The VM also runs Tarn (`~/projects/tarn/deploy/oracle/`). Because of that,
+  `ubuntu` has sudo only for `systemctl restart gtd-api` and
+  `journalctl -u gtd-api -n 50 --no-pager` (exactly what `deploy.yml` runs);
+  admin work uses a separate personal user over Tailscale SSH. A new sudo
+  command in `deploy.yml` needs a line in `/etc/sudoers.d/91-ubuntu-deploy`.
 - See the root `CLAUDE.md`'s "Webapp" section for the packaging gotcha that
   can make a published release 404 on webapp routes despite the code being
   correct — always confirm a new release actually bundles `webapp/` before
