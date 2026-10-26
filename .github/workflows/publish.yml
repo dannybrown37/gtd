@@ -44,16 +44,3 @@ jobs:
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
-
-  # Deploys the freshly published version to the Oracle Cloud VM.
-  # Implemented in deploy.yml so it can also be run by hand from the Actions
-  # tab (workflow_dispatch) without cutting a release.
-  deploy:
-    needs: publish
-    permissions: {}
-    uses: $/.github/workflows/deploy.yml
-    # Without inherit, the called job gets empty `oci` environment secrets
-    # (v0.13.3 and v0.13.4 deploys failed with "OAuth identity empty").
-    secrets: inherit # zizmor: ignore[secrets-inherit]
-    with:
-      version: ${{ github.ref_name }}

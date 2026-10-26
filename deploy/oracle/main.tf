@@ -83,16 +83,8 @@ resource "oci_core_security_list" "gtd" {
     }
   }
 
-  # SSH, for initial setup and ongoing admin access.
-  ingress_security_rules {
-    protocol = "6" # TCP
-    source   = "0.0.0.0/0"
-
-    tcp_options {
-      min = 22
-      max = 22
-    }
-  }
+  # No public SSH: admin access is Tailscale SSH only. To bootstrap a new VM,
+  # add a TCP 22 rule from your own IP, run bootstrap.sh, then remove it.
 
   # Tailscale direct (UDP) connections. Without this, Tailscale still works
   # by falling back to its relay (DERP) servers, just with extra latency.
