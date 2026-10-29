@@ -266,6 +266,8 @@ actions, and the guided **Weekly Review**. The review's ticks are stored
 locally alongside the TUI's, so a step you complete on the phone shows up in
 the terminal and vice versa.
 
+The old Oracle VM deploy (`deploy/oracle/`) is retired: that VM now runs a
+different app, which owns its Terraform.
 
 **Install**: `uv tool install "gtd-tui[api]"`
 **Run**: `gtd api` (default `0.0.0.0:8000`) or `gtd api --port 9000`
