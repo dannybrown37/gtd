@@ -1,4 +1,4 @@
-default_install_hook_types: [pre-commit, commit-msg]
+default_install_hook_types: [pre-commit, commit-msg, pre-push]
 default_stages: [pre-commit]
 
 repos:
@@ -6,7 +6,7 @@ repos:
   # test hook, by recovering it from git's argv -- the commitizen hook below
   # runs in a separate git invocation and can only ever fail after the suite.
   - repo: https://github.com/dannybrown37/git-a-grip
-    rev: v0.15.1
+    rev: v0.16.2
     hooks:
       - id: commitizen-early
         fail_fast: true
@@ -15,6 +15,7 @@ repos:
       - id: pytest
         args: ['--runner=uv run --extra api pytest', tests/, -q]
       - id: block-private-terms
+      - id: protect-branch
       - id: zizmor
       # The runner installs mypy itself; the stub package is the one thing
       # `--with mypy` cannot know it needs.
