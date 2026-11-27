@@ -24,13 +24,13 @@ repos:
           - '--runner=uv run --extra api --with mypy --with types-python-dateutil mypy'
 
   - repo: https://github.com/commitizen-tools/commitizen
-    rev: v4.16.5
+    rev: v4.19.4
     hooks:
       - id: commitizen
         stages: [commit-msg]
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.6.0
+    rev: v6.0.0
     hooks:
       - id: end-of-file-fixer
       - id: check-executables-have-shebangs
@@ -43,7 +43,7 @@ repos:
       - id: mixed-line-ending
 
   - repo: https://github.com/scop/pre-commit-shfmt
-    rev: v3.8.0-1
+    rev: v3.14.1-1
     hooks:
       - id: shfmt
         args: ["-i", "4"]
